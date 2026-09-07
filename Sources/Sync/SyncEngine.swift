@@ -102,7 +102,8 @@ final class SyncEngine {
                 context.delete(upload)
                 delivered = true
             } catch let error as APIError {
-                Analytics.report(error)
+                Analytics.report(error, context: "upload-\(entity.kind.rawValue)",
+                                 attempt: upload.attemptCount)
                 if case .unauthorized = error { session.signOut(clearLocalData: false); return delivered }
                 if error.isRetryable { break } // offline/5xx: retry the whole queue later
                 upload.attemptCount += 1
@@ -139,7 +140,8 @@ final class SyncEngine {
             do {
                 if try await deliver(mutation, client: client) { delivered = true }
             } catch let error as APIError {
-                Analytics.report(error)
+                Analytics.report(error, context: "push-\(mutation.op.rawValue)-\(mutation.kind.rawValue)",
+                                 attempt: mutation.attemptCount)
                 if case .unauthorized = error { session.signOut(clearLocalData: false); return delivered }
                 if error.isRetryable { break } // offline/5xx: stop, retry whole queue later
                 mutation.attemptCount += 1
@@ -359,9 +361,8 @@ final class SyncEngine {
         let outcome = await syncActor.pullAll(config: config, windowDays: pullWindowDays)
         if let error = outcome.error {
             if error == SyncActor.unauthorized { session.signOut(clearLocalData: false); return false }
-            // Pull failures surface only as a user-facing string; report them as a coarse
-            // network error (the common cause) without the message text.
-            Analytics.error(network: "pull")
+            // Already reported inside ``SyncActor`` with its category and the kind that failed;
+            // here the message is only for the user.
             status = .failed(error)
             return false
         }

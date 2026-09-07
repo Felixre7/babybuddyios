@@ -30,14 +30,16 @@ actor SyncActor {
             if modelContext.hasChanges { try modelContext.save() }
         } catch APIError.notFound {
             // Tags endpoint absent on this server version — skip.
+            Analytics.serverEndpointMissing("tags")
         } catch APIError.unauthorized {
             return PullOutcome(error: Self.unauthorized, changed: changed)
         } catch let error as APIError {
-            return PullOutcome(error: error.userMessage, changed: changed)
+            return Self.fail(error, endpoint: "tags", changed: changed)
         } catch {
+            Analytics.error(network: "pull-unknown")
             return PullOutcome(error: error.localizedDescription, changed: changed)
         }
-        var serverError: String?     // last 5xx seen; surfaced only if *every* kind fails this way
+        var serverError: APIError?   // last 5xx seen; surfaced only if *every* kind fails this way
         var pulledAnyKind = false
         for kind in EntityKind.allCases {
             do {
@@ -50,6 +52,7 @@ actor SyncActor {
                 }
                 pulledAnyKind = true
             } catch APIError.notFound {
+                Analytics.serverEndpointMissing(kind.rawValue)
                 continue                      // endpoint absent on this server version
             } catch APIError.unauthorized {
                 return PullOutcome(error: Self.unauthorized, changed: changed)
@@ -59,20 +62,32 @@ actor SyncActor {
                 // failed kind's partial upserts so a half-pulled page never gets committed by the
                 // next kind's save. Only if *every* kind 5xxes (server broadly unhealthy) is the
                 // error surfaced, after the loop.
+                // Deliberately not reported per kind: a server that is down 5xxes every kind, so
+                // that would be one signal per kind per sync. Reported once below, if it turns out
+                // nothing synced at all.
                 modelContext.rollback()
-                serverError = error.userMessage
+                serverError = error
                 continue
             } catch let error as APIError {
-                return PullOutcome(error: error.userMessage, changed: changed)
+                return Self.fail(error, endpoint: kind.rawValue, changed: changed)
             } catch {
+                Analytics.error(network: "pull-unknown")
                 return PullOutcome(error: error.localizedDescription, changed: changed)
             }
         }
         // Surface a server error only when nothing synced at all; a partial pull keeps its data.
         if !pulledAnyKind, let serverError {
-            return PullOutcome(error: serverError, changed: changed)
+            return Self.fail(serverError, endpoint: "all", changed: changed)
         }
         return PullOutcome(error: nil, changed: changed)
+    }
+
+    /// Report a pull failure and turn it into the outcome the caller surfaces. `endpoint` is the
+    /// kind that failed (or `all` when every kind did), so a pull error says *what* couldn't be
+    /// fetched rather than only that a pull failed.
+    private static func fail(_ error: APIError, endpoint: String, changed: Bool) -> PullOutcome {
+        Analytics.report(error, context: "pull-\(endpoint)")
+        return PullOutcome(error: error.userMessage, changed: changed)
     }
 
     /// Pull the server's global tag list into the cache for the picker's autocomplete.

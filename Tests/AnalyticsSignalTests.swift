@@ -162,5 +162,61 @@ final class AnalyticsSignalTests: XCTestCase {
         XCTAssertEqual(sources, [.nudgeGentle, .nudgeMilestone, .nudgeBanner])
         XCTAssertEqual(Set(sources.map(\.rawValue)).count, 3)
     }
+
+    // MARK: - Errors
+
+    /// `Error.serverRejected` covers six different failures at once, so the dimensions are the whole
+    /// value of the signal: without them a rejection is unactionable, and a single un-deliverable
+    /// queue entry retrying on every sync is indistinguishable from many users hitting one bug.
+    func testServerRejectedCarriesWhereItHappenedAndWhichFields() {
+        Analytics.report(.badRequest(status: 400, message: "amount: this field is required",
+                                     fields: ["amount", "child"]),
+                         context: "push-create-pumping", attempt: 3)
+        XCTAssertEqual(recorder.parameters("Error.serverRejected"),
+                       ["reason": "badRequest-400", "fields": "amount,child",
+                        "context": "push-create-pumping", "attempt": "3"])
+    }
+
+    /// The server's message never leaves the device, only the keys it named — the values are
+    /// whatever the user typed.
+    func testServerRejectedNeverCarriesTheServersMessage() {
+        Analytics.report(.badRequest(status: 400, message: "notes: 'Ollie fed at Grandma's'",
+                                     fields: ["notes"]))
+        let parameters = recorder.parameters("Error.serverRejected") ?? [:]
+        XCTAssertEqual(parameters, ["reason": "badRequest-400", "fields": "notes"])
+        XCTAssertFalse(parameters.values.contains { $0.contains("Ollie") })
+    }
+
+    /// Connectivity stays on `Error.network`; only the server's own refusals are "rejected".
+    func testTransportFailuresAreNotServerRejections() {
+        Analytics.report(.offline())
+        Analytics.report(.server(status: 502))
+        XCTAssertEqual(recorder.names, ["Error.network", "Error.network"])
+        XCTAssertEqual(recorder.signals.map { $0.parameters["reason"] }, ["offline", "server-502"])
+    }
+
+    /// "Can't connect" is the support burden of a self-hosted app, and the four causes need four
+    /// different answers from us — so they must not arrive as one undifferentiated `offline`.
+    func testTransportFailuresKeepTheirCause() {
+        let codes: [URLError.Code] = [.notConnectedToInternet, .cannotFindHost, .cannotConnectToHost,
+                                      .serverCertificateUntrusted, .timedOut, .badServerResponse]
+        XCTAssertEqual(codes.map { APIError.TransportFailure($0).rawValue },
+                       ["offline", "dns", "cannotConnect", "tls", "timeout", "other"])
+
+        Analytics.report(.offline(reason: .tls), context: "signIn")
+        XCTAssertEqual(recorder.parameters("Error.network"),
+                       ["reason": "tls", "context": "signIn"])
+    }
+
+    /// A missing endpoint is a fact about the server, not about this sync — the second report of
+    /// the same one is pure billing.
+    func testEndpointMissingIsReportedOncePerEndpoint() {
+        Analytics.resetEndpointMissingDedupe() // the dedupe outlives any one test
+        Analytics.serverEndpointMissing("pumping")
+        Analytics.serverEndpointMissing("pumping")
+        Analytics.serverEndpointMissing("tags")
+        XCTAssertEqual(recorder.names, ["Server.endpointMissing", "Server.endpointMissing"])
+        XCTAssertEqual(recorder.signals.map { $0.parameters["endpoint"] }, ["pumping", "tags"])
+    }
 }
 #endif

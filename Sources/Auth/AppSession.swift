@@ -90,6 +90,7 @@ final class AppSession {
         lastError = nil
         let normalized = Self.normalizedServerURLString(serverURL)
         guard let url = URL(string: normalized), url.host != nil else {
+            Analytics.report(.invalidURL, context: "signIn")
             lastError = "That doesn't look like a valid server address."
             return false
         }
@@ -109,9 +110,15 @@ final class AppSession {
             client = probe
             return true
         } catch let error as APIError {
+            // Sign-in is the step this app is most likely to lose someone at — a URL typo, a
+            // server that isn't reachable from outside the LAN, a self-signed certificate, a
+            // mistyped token all end here, and `Onboarding.completed` only ever fires on the
+            // happy path. Without this the funnel has no denominator.
+            Analytics.report(error, context: "signIn")
             lastError = error.userMessage
             return false
         } catch {
+            Analytics.error(network: "signIn-unknown")
             lastError = error.localizedDescription
             return false
         }
