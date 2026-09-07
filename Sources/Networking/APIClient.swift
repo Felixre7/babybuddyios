@@ -202,15 +202,12 @@ final class APIClient {
         do {
             (data, response) = try await session.data(for: req)
         } catch let urlError as URLError {
-            switch urlError.code {
-            case .notConnectedToInternet, .networkConnectionLost, .cannotConnectToHost,
-                 .timedOut, .cannotFindHost, .dnsLookupFailed, .dataNotAllowed:
-                throw APIError.offline
-            default:
-                throw APIError.offline
-            }
+            throw APIError.offline(reason: APIError.TransportFailure(urlError.code))
         }
-        guard let http = response as? HTTPURLResponse else { throw APIError.offline }
+        // Not an HTTP response at all — something answered, but not the API.
+        guard let http = response as? HTTPURLResponse else {
+            throw APIError.offline(reason: .other)
+        }
         switch http.statusCode {
         case 200...299:
             return data
@@ -223,10 +220,19 @@ final class APIClient {
         case 409:
             throw APIError.conflict
         case 400...499:
-            throw APIError.badRequest(status: http.statusCode, message: Self.errorMessage(from: data))
+            throw APIError.badRequest(status: http.statusCode,
+                                      message: Self.errorMessage(from: data),
+                                      fields: Self.errorFields(from: data))
         default:
             throw APIError.server(status: http.statusCode)
         }
+    }
+
+    /// The field names a DRF validation body named (`{"amount": ["..."]}` -> `["amount"]`). Keys
+    /// only — the messages themselves can echo what the user entered, so they never leave the device.
+    private static func errorFields(from data: Data) -> [String] {
+        guard let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return [] }
+        return dict.keys.sorted()
     }
 
     private static func errorMessage(from data: Data) -> String? {

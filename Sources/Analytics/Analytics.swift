@@ -72,6 +72,12 @@ enum Analytics {
     /// no attribution), and the flows that emit them run through `Purchases.shared` and can't be
     /// exercised without live StoreKit. Compiled out of release entirely.
     static var recorder: ((_ name: String, _ parameters: [String: String]) -> Void)?
+
+    /// Test seam: forgets which endpoints have already been reported missing. The dedupe in
+    /// ``serverEndpointMissing(_:)`` is per *launch*, which in a test host means per whole suite —
+    /// so without this a sync test that trips it would silently change what a later analytics test
+    /// sees.
+    static func resetEndpointMissingDedupe() { reportedMissingEndpoints = [] }
     #endif
 }
 
@@ -186,6 +192,21 @@ extension Analytics {
     /// A network/connectivity error with a short, non-identifying reason.
     static func error(network reason: String) {
         signal("Error.network", parameters: ["reason": reason])
+    }
+
+    /// Endpoints already reported missing this launch — see ``serverEndpointMissing(_:)``.
+    private static var reportedMissingEndpoints: Set<String> = []
+
+    /// An endpoint this server version doesn't have. Baby Buddy grew `pumping`, `tags` and others
+    /// over its releases, and a self-hosted server is whatever version its owner last pulled — so
+    /// which endpoints are missing in the field is the closest thing we have to a version census,
+    /// and it explains the `notFound` rejections a push of that same kind produces.
+    ///
+    /// Reported once per launch per endpoint: a missing endpoint is a fact about the server, not
+    /// about this sync, and every sync would otherwise re-report it forever.
+    static func serverEndpointMissing(_ endpoint: String) {
+        guard reportedMissingEndpoints.insert(endpoint).inserted else { return }
+        signal("Server.endpointMissing", parameters: ["endpoint": endpoint])
     }
 
     /// A named setting was switched on or off. Carries the setting's name and the new boolean only
@@ -358,26 +379,39 @@ extension Analytics {
 
     /// Coarse error reporting from API failures — category + a short, non-identifying reason.
     /// Never carries the server's message text (which could include user data).
-    static func report(_ error: APIError) {
+    ///
+    /// `context` is *where* it happened (`push-create-pumping`, `upload-note`) and `attempt` how
+    /// many times that same queued item has already failed. Both exist because the push queue
+    /// retries a non-retryable failure on every sync: without them one un-deliverable record looks
+    /// like a flood of unrelated rejections. For a validation error `fields` names the keys the
+    /// server complained about — never their values.
+    static func report(_ error: APIError, context: String? = nil, attempt: Int? = nil) {
+        var parameters: [String: String] = [:]
+        if let context { parameters["context"] = context }
+        if let attempt { parameters["attempt"] = String(attempt) }
+
+        let name: String
         switch error {
-        case .offline:
-            signal("Error.network", parameters: ["reason": "offline"])
+        case .offline(let transport):
+            name = "Error.network"; parameters["reason"] = transport.rawValue
         case .server(let status):
-            signal("Error.network", parameters: ["reason": "server-\(status)"])
+            name = "Error.network"; parameters["reason"] = "server-\(status)"
         case .unauthorized:
-            signal("Error.serverRejected", parameters: ["reason": "unauthorized"])
+            name = "Error.serverRejected"; parameters["reason"] = "unauthorized"
         case .forbidden:
-            signal("Error.serverRejected", parameters: ["reason": "forbidden"])
+            name = "Error.serverRejected"; parameters["reason"] = "forbidden"
         case .notFound:
-            signal("Error.serverRejected", parameters: ["reason": "notFound"])
+            name = "Error.serverRejected"; parameters["reason"] = "notFound"
         case .conflict:
-            signal("Error.serverRejected", parameters: ["reason": "conflict"])
-        case .badRequest(let status, _):
-            signal("Error.serverRejected", parameters: ["reason": "badRequest-\(status)"])
+            name = "Error.serverRejected"; parameters["reason"] = "conflict"
+        case .badRequest(let status, _, let fields):
+            name = "Error.serverRejected"; parameters["reason"] = "badRequest-\(status)"
+            if !fields.isEmpty { parameters["fields"] = fields.joined(separator: ",") }
         case .decoding:
-            signal("Error.serverRejected", parameters: ["reason": "decoding"])
+            name = "Error.serverRejected"; parameters["reason"] = "decoding"
         case .invalidURL:
-            signal("Error.serverRejected", parameters: ["reason": "invalidURL"])
+            name = "Error.serverRejected"; parameters["reason"] = "invalidURL"
         }
+        signal(name, parameters: parameters)
     }
 }

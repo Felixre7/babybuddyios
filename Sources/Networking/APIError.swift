@@ -4,7 +4,11 @@ import Foundation
 /// to decide whether to retry, queue, raise a conflict, or prompt re-authentication.
 enum APIError: Error, Equatable {
     /// No network / server unreachable. Safe to keep the mutation queued and retry later.
-    case offline
+    /// `reason` separates genuinely offline from the failures that look identical to the user but
+    /// need a completely different fix — a self-signed certificate, a hostname that doesn't
+    /// resolve, a server that never answers. Self-hosting makes those the common case, not the
+    /// exotic one.
+    case offline(reason: TransportFailure = .offline)
     /// 401 — token rejected. Session should be invalidated and the user re-prompted.
     case unauthorized
     /// 403 — authenticated but not permitted.
@@ -15,12 +19,50 @@ enum APIError: Error, Equatable {
     case conflict
     /// Any 5xx. Transient; retry with backoff.
     case server(status: Int)
-    /// 4xx other than the above (validation errors etc.). Carries the server's message if any.
-    case badRequest(status: Int, message: String?)
+    /// 4xx other than the above (validation errors etc.). Carries the server's message if any,
+    /// plus the field names the server named (`fields`) — the keys of a DRF validation body. The
+    /// keys alone are safe to report; the messages can quote what the user typed.
+    case badRequest(status: Int, message: String?, fields: [String] = [])
     /// Response body could not be decoded into the expected type.
     case decoding(String)
     /// The configured server URL is invalid.
     case invalidURL
+
+    /// Why a request never got an answer. Derived from `URLError.Code`.
+    enum TransportFailure: String {
+        /// No route at all — airplane mode, connection lost, cellular data off.
+        case offline
+        /// The address doesn't resolve.
+        case dns
+        /// Resolved, but nothing accepted the connection (wrong port, server down, not on the LAN).
+        case cannotConnect
+        /// TLS refused: self-signed or expired certificate, or ATS blocking a plain-http address.
+        case tls
+        /// Connected, then nothing came back in time.
+        case timeout
+        case other
+
+        init(_ code: URLError.Code) {
+            switch code {
+            case .notConnectedToInternet, .networkConnectionLost, .dataNotAllowed,
+                 .internationalRoamingOff:
+                self = .offline
+            case .cannotFindHost, .dnsLookupFailed:
+                self = .dns
+            case .cannotConnectToHost:
+                self = .cannotConnect
+            case .secureConnectionFailed, .serverCertificateUntrusted, .serverCertificateHasBadDate,
+                 .serverCertificateHasUnknownRoot, .serverCertificateNotYetValid,
+                 .clientCertificateRejected, .clientCertificateRequired,
+                 .appTransportSecurityRequiresSecureConnection:
+                self = .tls
+            case .timedOut:
+                self = .timeout
+            default:
+                self = .other
+            }
+        }
+    }
 
     var isRetryable: Bool {
         switch self {
@@ -39,13 +81,19 @@ enum APIError: Error, Equatable {
 
     var userMessage: String {
         switch self {
+        case .offline(.dns): return "Couldn't find that server address."
+        case .offline(.cannotConnect):
+            return "Couldn't reach the server. Check the address, and that you're on the same network as it."
+        case .offline(.tls):
+            return "The server's security certificate wasn't accepted. A self-signed certificate has to be trusted on this device first."
+        case .offline(.timeout): return "The server took too long to respond."
         case .offline: return "No connection to the Baby Buddy server."
         case .unauthorized: return "Your API token was rejected. Please sign in again."
         case .forbidden: return "You don't have permission to do that."
         case .notFound: return "That record no longer exists on the server."
         case .conflict: return "This record was changed on the server."
         case .server(let status): return "Server error (\(status)). Please try again later."
-        case .badRequest(_, let message): return message ?? "The server rejected the request."
+        case .badRequest(_, let message, _): return message ?? "The server rejected the request."
         case .decoding(let detail): return "Couldn't read the server response. \(detail)"
         case .invalidURL: return "The server address is not valid."
         }
