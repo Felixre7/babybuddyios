@@ -135,16 +135,32 @@ final class APIClient {
     }
 
     /// PATCH a single image file field (`multipart/form-data`) onto an existing record — the one
-    /// non-JSON write. Returns the updated record so the caller can reconcile the new media URL.
-    func uploadImage(path: String, id: Int, field: String, filename: String,
+    /// non-JSON write. `lookup` is the detail-route identifier, which is *not* always the database
+    /// id: Baby Buddy routes children by `slug` (`lookup_field = "slug"` on its child view) and
+    /// everything else by numeric id. Returns the updated record so the caller can reconcile the
+    /// new media URL.
+    func uploadImage(path: String, lookup: String, field: String, filename: String,
                      mimeType: String, data: Data) async throws -> Data {
+        guard Self.isSafeLookup(lookup) else { throw APIError.invalidURL }
         let boundary = MultipartForm.boundary()
-        var req = try makeRequest(path: "\(path)/\(id)/", method: "PATCH")
+        var req = try makeRequest(path: "\(path)/\(lookup)/", method: "PATCH")
         req.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
         req.httpBody = MultipartForm.imageBody(
             boundary: boundary, field: field, filename: filename, mimeType: mimeType, data: data)
         return try await sendRaw(req)
     }
+
+    /// Whether a detail-route lookup value is safe to splice into a request path. `makeRequest`
+    /// appends the whole path in one go, so a `/` or `..` reaching it from a server payload would
+    /// repoint the request; pre-escaping isn't an option either, because `appendingPathComponent`
+    /// would then double-encode the `%`. Baby Buddy ids are digits and its slugs are Django
+    /// `SlugField`s, so accept exactly `validate_slug`'s alphabet and reject anything else.
+    static func isSafeLookup(_ value: String) -> Bool {
+        !value.isEmpty && value.unicodeScalars.allSatisfy(slugAlphabet.contains)
+    }
+
+    private static let slugAlphabet = CharacterSet(
+        charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_")
 
     func deleteRaw(path: String, id: Int) async throws {
         _ = try await sendRaw(try makeRequest(path: "\(path)/\(id)/", method: "DELETE"))
