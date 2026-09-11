@@ -59,6 +59,9 @@ struct LocalRepository {
         if let pending = pendingMutation(for: entity.localID) {
             // Coalesce: keep the original op (create stays create), refresh the body.
             pending.payload = data
+            // A blocked row is terminal for the payload that was rejected, not for the record.
+            // This is a different payload now, so it earns a fresh attempt.
+            pending.retryOnce()
         } else {
             entity.syncState = .pendingUpdate
             context.insert(PendingMutation(
@@ -202,6 +205,34 @@ struct LocalRepository {
             entity?.syncState = .synced
         }
         context.delete(mutation)
+        try? context.save()
+    }
+
+    /// Cancel a queued image upload, leaving the record itself alone.
+    ///
+    /// The pending bytes double as the record's local `file://` preview, so dropping the queue row
+    /// alone would leave the entity pointing at a file that no longer exists. The image field is
+    /// put back the way it was — the remote URL from the last synced snapshot, or absent when the
+    /// record never had an image. Only that one field is touched: an unrelated un-pushed edit to
+    /// the same record stays exactly as the user left it.
+    func discardPendingImage(_ upload: PendingImageUpload) {
+        if let entity = LocalStore.fetch(localID: upload.localID, in: context),
+           let field = entity.kind.imageField {
+            var payload = entity.payloadObject
+            let base = entity.baseSnapshot
+                .flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
+            if let prior = base?[field], !(prior is NSNull) {
+                payload[field] = prior
+            } else {
+                payload.removeValue(forKey: field)
+            }
+            if let data = try? JSONSerialization.data(withJSONObject: payload) {
+                entity.payload = data
+                entity.updatedAt = .now
+            }
+        }
+        ImageUploadStore.delete(upload.filename)
+        context.delete(upload)
         try? context.save()
     }
 

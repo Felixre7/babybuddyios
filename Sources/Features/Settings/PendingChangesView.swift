@@ -2,29 +2,49 @@ import SwiftUI
 import SwiftData
 
 /// The offline-first sync queue, laid bare: every write waiting to reach the server, oldest
-/// first. Each row says what change is queued and shows the record's detail; swiping discards
-/// it, reverting the cached record to the server's last-known state. It edits the *queue* —
-/// it never opens the underlying record for editing.
+/// first — queued record changes and queued photo uploads alike. Each row says what is waiting
+/// and shows the record's detail.
+///
+/// Rows come in two states. **Waiting** work just hasn't been delivered yet (offline, or the
+/// server is down) and needs nothing from the user. **Blocked** work was rejected by the server
+/// in a way that re-sending can't fix, so sync stopped retrying it and parked it here: those rows
+/// carry the server's reason and an explicit Retry. Either way Discard cancels the queued work —
+/// it edits the *queue*, never the underlying record, which it never opens for editing.
 struct PendingChangesView: View {
     @Environment(\.modelContext) private var context
+    @Environment(SyncEngine.self) private var sync
     @Environment(\.dismiss) private var dismiss
     @Query(sort: \PendingMutation.createdAt) private var mutations: [PendingMutation]
+    @Query(sort: \PendingImageUpload.createdAt) private var uploads: [PendingImageUpload]
+
+    /// The row awaiting discard confirmation. Discarding a queued create throws away the only
+    /// copy of that activity, so it asks first.
+    @State private var discarding: QueueTarget?
 
     var body: some View {
         NavigationStack {
             List {
                 ForEach(mutations) { mutation in
-                    PendingChangeRow(mutation: mutation,
-                                     entity: LocalStore.fetch(localID: mutation.localID, in: context))
-                        .listRowInsets(EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16))
-                        .listRowSeparator(.hidden)
-                        .listRowBackground(Color.clear)
-                        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                            Button(role: .destructive) { discard(mutation) } label: {
-                                Label("Discard", systemImage: "trash")
-                            }
-                            .tint(BBColor.danger)
-                        }
+                    let entity = LocalStore.fetch(localID: mutation.localID, in: context)
+                    row(QueueRow(kind: mutation.kind,
+                                 title: title(for: mutation),
+                                 detail: entity.flatMap(EntityFormatting.subtitle),
+                                 lastError: mutation.lastError,
+                                 isBlocked: mutation.isBlocked,
+                                 createdAt: mutation.createdAt,
+                                 onRetry: { sync.retry(mutation) }),
+                        target: .mutation(mutation))
+                }
+                ForEach(uploads) { upload in
+                    let entity = LocalStore.fetch(localID: upload.localID, in: context)
+                    row(QueueRow(kind: upload.kind,
+                                 title: "\(upload.kind.displayName) photo",
+                                 detail: entity.flatMap(EntityFormatting.subtitle),
+                                 lastError: upload.lastError,
+                                 isBlocked: upload.isBlocked,
+                                 createdAt: upload.createdAt,
+                                 onRetry: { sync.retry(upload) }),
+                        target: .upload(upload))
                 }
             }
             .listStyle(.plain)
@@ -36,49 +56,64 @@ struct PendingChangesView: View {
                 ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } }
             }
             .overlay {
-                if mutations.isEmpty {
+                if mutations.isEmpty && uploads.isEmpty {
                     ContentUnavailableView("All Synced", systemImage: "checkmark.icloud",
                         description: Text("No changes are waiting to upload."))
                 }
             }
-        }
-    }
-
-    private func discard(_ mutation: PendingMutation) {
-        LocalRepository(context: context).discardPending(mutation)
-    }
-}
-
-/// One queued change: tinted activity tile, what's waiting ("Added feeding"), the record's
-/// detail, the time it was queued, and any delivery error.
-private struct PendingChangeRow: View {
-    let mutation: PendingMutation
-    let entity: LocalEntity?
-
-    var body: some View {
-        BBCard(cornerRadius: BBRadius.row, padding: 13) {
-            HStack(spacing: 12) {
-                ActivityTile(kind: mutation.kind, size: 40, glyph: 21)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(title)
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.primary)
-                    if let detail, !detail.isEmpty {
-                        Text(detail).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                    }
-                    if let error = mutation.lastError {
-                        Text(error).font(.caption2).foregroundStyle(BBColor.danger).lineLimit(2)
-                    }
-                }
-                Spacer(minLength: 8)
-                Text(mutation.createdAt, format: .relative(presentation: .named))
-                    .font(.caption2).foregroundStyle(.tertiary).lineLimit(1)
+            // `.alert`, not `confirmationDialog` — iOS 26 anchors the latter to its source as a
+            // popover and drops the cancel action, leaving a destructive prompt with no way back.
+            .alert("Discard this change?", isPresented: discardPrompt, presenting: discarding) { target in
+                Button("Discard", role: .destructive) { discard(target) }
+                Button("Cancel", role: .cancel) {}
+            } message: { target in
+                Text(discardWarning(target))
             }
         }
     }
 
+    @ViewBuilder
+    private func row(_ content: QueueRow, target: QueueTarget) -> some View {
+        content
+            .listRowInsets(EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16))
+            .listRowSeparator(.hidden)
+            .listRowBackground(Color.clear)
+            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                Button(role: .destructive) { discarding = target } label: {
+                    Label("Discard", systemImage: "trash")
+                }
+                .tint(BBColor.danger)
+            }
+    }
+
+    private var discardPrompt: Binding<Bool> {
+        Binding(get: { discarding != nil }, set: { if !$0 { discarding = nil } })
+    }
+
+    private func discardWarning(_ target: QueueTarget) -> String {
+        switch target {
+        case .mutation(let mutation):
+            switch mutation.op {
+            case .create: return "This \(mutation.kind.displayName.lowercased()) never reached the server, so discarding it deletes it from this device too."
+            case .update: return "Your unsaved edits are discarded and the record goes back to the server's version."
+            case .delete: return "The record stays on the server and reappears on this device."
+            }
+        case .upload:
+            return "The photo is removed from this device. Any photo already on the server is kept."
+        }
+    }
+
+    private func discard(_ target: QueueTarget) {
+        let repo = LocalRepository(context: context)
+        switch target {
+        case .mutation(let mutation): repo.discardPending(mutation)
+        case .upload(let upload): repo.discardPendingImage(upload)
+        }
+        discarding = nil
+    }
+
     /// What the queued write does, in plain words.
-    private var title: String {
+    private func title(for mutation: PendingMutation) -> String {
         let name = mutation.kind.displayName
         switch mutation.op {
         case .create: return "Added \(name)"
@@ -87,7 +122,84 @@ private struct PendingChangeRow: View {
         }
     }
 
-    private var detail: String? {
-        entity.flatMap(EntityFormatting.subtitle)
+    /// Which queue row a confirmation is about. The two queues are separate models with separate
+    /// discard semantics, so the prompt has to remember which one it's holding.
+    private enum QueueTarget: Identifiable {
+        case mutation(PendingMutation)
+        case upload(PendingImageUpload)
+
+        var id: UUID {
+            switch self {
+            case .mutation(let m): return m.id
+            case .upload(let u): return u.id
+            }
+        }
+    }
+}
+
+/// One queued item: tinted activity tile, what's waiting ("Added Feeding", "Child photo"), the
+/// record's detail, when it was queued — and, when the server has refused it, why, plus the Retry
+/// that is the only thing that will make sync pick it up again.
+private struct QueueRow: View {
+    let kind: EntityKind
+    let title: String
+    let detail: String?
+    let lastError: String?
+    let isBlocked: Bool
+    let createdAt: Date
+    let onRetry: () -> Void
+
+    var body: some View {
+        BBCard(cornerRadius: BBRadius.row, padding: 13) {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 12) {
+                    ActivityTile(kind: kind, size: 40, glyph: 21)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(title)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.primary)
+                        if let detail, !detail.isEmpty {
+                            Text(detail).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                        }
+                        statusLine
+                    }
+                    Spacer(minLength: 8)
+                    Text(createdAt, format: .relative(presentation: .named))
+                        .font(.caption2).foregroundStyle(.tertiary).lineLimit(1)
+                }
+                if isBlocked {
+                    Button(action: onRetry) {
+                        Label("Retry", systemImage: "arrow.clockwise")
+                            .font(.caption.weight(.semibold))
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 7)
+                            .background(BBColor.brandTint, in: RoundedRectangle(
+                                cornerRadius: BBRadius.control, style: .continuous))
+                            .foregroundStyle(BBColor.brandAccent)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+    }
+
+    /// Blocked rows lead with the state, then the server's own words. A waiting row that has
+    /// simply not gone out yet says so quietly; one that failed transiently still shows why.
+    @ViewBuilder private var statusLine: some View {
+        if isBlocked {
+            Text("Needs attention")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(BBColor.danger)
+        }
+        if let lastError, !lastError.isEmpty {
+            Text(lastError)
+                .font(.caption2)
+                .foregroundStyle(isBlocked ? BBColor.danger : .secondary)
+                .lineLimit(3)
+        } else if !isBlocked {
+            Text("Waiting to sync")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+        }
     }
 }

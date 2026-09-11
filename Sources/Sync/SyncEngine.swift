@@ -46,9 +46,17 @@ final class SyncEngine {
     /// Guards against overlapping syncs (foreground + reconnect + manual could collide).
     private var isSyncing = false
 
-    init(session: AppSession, context: ModelContext) {
+    /// Stands in for ``AppSession/client`` so the push/upload loops can be driven against a stub
+    /// transport. `nil` in the app, where the session owns the client and its lifetime.
+    private let clientOverride: APIClient?
+
+    /// The client the queues deliver through.
+    private var apiClient: APIClient? { clientOverride ?? session.client }
+
+    init(session: AppSession, context: ModelContext, client: APIClient? = nil) {
         self.session = session
         self.context = context
+        self.clientOverride = client
         self.syncActor = SyncActor(modelContainer: context.container)
         self.historyHorizon = Calendar.current.date(
             byAdding: .day, value: -SyncEngine.defaultPullWindowDays, to: .now) ?? .now
@@ -80,11 +88,14 @@ final class SyncEngine {
         #if DEBUG
         if session.isDemo { return false }
         #endif
-        guard let client = session.client else { return false }
+        guard let client = apiClient else { return false }
         let queue = (try? context.fetch(
             FetchDescriptor<PendingImageUpload>(sortBy: [SortDescriptor(\.createdAt)]))) ?? []
         var delivered = false
-        for upload in queue {
+        uploads: for upload in queue {
+            // Parked by a terminal rejection: still queued and visible in Pending Changes, but
+            // not re-sent until the user explicitly retries it.
+            if upload.isBlocked { continue }
             guard let entity = LocalStore.fetch(localID: upload.localID, in: context),
                   entity.serverID != nil, entity.syncState == .synced,
                   let field = entity.kind.imageField else {
@@ -110,15 +121,18 @@ final class SyncEngine {
                 context.delete(upload)
                 delivered = true
             } catch let error as APIError {
+                // Reported here, once per real attempt. A row that blocks is skipped from now on,
+                // so this fires on the transition rather than on every sync that walks past it.
                 Analytics.report(error, context: "upload-\(entity.kind.rawValue)",
                                  attempt: upload.attemptCount)
-                if case .unauthorized = error { session.signOut(clearLocalData: false); return delivered }
-                if error.isRetryable { break } // offline/5xx: retry the whole queue later
-                upload.attemptCount += 1
-                upload.lastError = error.userMessage
+                switch error.queueOutcome {
+                case .signOut: session.signOut(clearLocalData: false); return delivered
+                case .retryLater: break uploads // offline/5xx: retry the whole queue later
+                case .blocked: upload.fail(error.userMessage, blocked: true)
+                case .recordAndRetry: upload.fail(error.userMessage, blocked: false)
+                }
             } catch {
-                upload.attemptCount += 1
-                upload.lastError = error.localizedDescription
+                upload.fail(error.localizedDescription, blocked: false)
             }
         }
         try? context.save()
@@ -134,11 +148,14 @@ final class SyncEngine {
         #if DEBUG
         if session.isDemo { return false }
         #endif
-        guard let client = session.client else { return false }
+        guard let client = apiClient else { return false }
         let queue = (try? context.fetch(
             FetchDescriptor<PendingMutation>(sortBy: [SortDescriptor(\.createdAt)]))) ?? []
         var delivered = false
-        for mutation in queue {
+        mutations: for mutation in queue {
+            // Parked by a terminal rejection. Skipped rather than aborting the loop, so one poison
+            // record doesn't hold up every write queued behind it.
+            if mutation.isBlocked { continue }
             // Skip a create the widget/intents extension is currently delivering, so we don't
             // double-POST it. A stale claim (extension killed mid-push) ages out and is retried.
             if let claimedAt = mutation.claimedAt,
@@ -148,15 +165,18 @@ final class SyncEngine {
             do {
                 if try await deliver(mutation, client: client) { delivered = true }
             } catch let error as APIError {
+                // Reported here, once per real attempt. A row that blocks is skipped from now on,
+                // so this fires on the transition rather than on every sync that walks past it.
                 Analytics.report(error, context: "push-\(mutation.op.rawValue)-\(mutation.kind.rawValue)",
                                  attempt: mutation.attemptCount)
-                if case .unauthorized = error { session.signOut(clearLocalData: false); return delivered }
-                if error.isRetryable { break } // offline/5xx: stop, retry whole queue later
-                mutation.attemptCount += 1
-                mutation.lastError = error.userMessage
+                switch error.queueOutcome {
+                case .signOut: session.signOut(clearLocalData: false); return delivered
+                case .retryLater: break mutations // offline/5xx: stop, retry whole queue later
+                case .blocked: mutation.fail(error.userMessage, blocked: true)
+                case .recordAndRetry: mutation.fail(error.userMessage, blocked: false)
+                }
             } catch {
-                mutation.attemptCount += 1
-                mutation.lastError = error.localizedDescription
+                mutation.fail(error.localizedDescription, blocked: false)
             }
         }
         try? context.save()
@@ -220,6 +240,14 @@ final class SyncEngine {
                 return false
             }
         }
+    }
+
+    /// The user's explicit "try this one again" on a blocked row. Nothing else un-blocks a row:
+    /// automatic syncs walk past it forever, which is the whole point.
+    func retry(_ item: some QueueItem) {
+        item.retryOnce()
+        try? context.save()
+        Task { await sync() }
     }
 
     /// Record a conflict for user resolution and stop retrying this mutation.

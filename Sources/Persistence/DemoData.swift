@@ -75,8 +75,10 @@ enum DemoData {
         try? context.save()
     }
 
-    /// Seed a few queued writes — one create, one update, one delete — so the Pending Changes
-    /// sheet can be verified in demo, where the sync engine never actually pushes.
+    /// Seed a few queued writes — one create, one update, one delete, one blocked create, and a
+    /// queued photo — so the Pending Changes sheet can be verified in demo, where the sync engine
+    /// never actually pushes. The blocked and photo rows are the states that have no other way to
+    /// be reached by hand: a real 400 and a real photo pick against a live server.
     private static func seedPending(into context: ModelContext) {
         func data(_ o: [String: Any]) -> Data { (try? JSONSerialization.data(withJSONObject: o)) ?? Data("{}".utf8) }
         let iso = APIDate.isoDateTime.string(from: Date())
@@ -105,6 +107,22 @@ enum DemoData {
             sleep.syncState = .pendingDelete
             context.insert(PendingMutation(localID: sleep.localID, kind: .sleep, op: .delete,
                                            payload: Data("{}".utf8), baseSnapshot: sleep.payload, serverID: 30))
+        }
+
+        // Blocked: a create the server refused on validation. Parked, not retried.
+        let rejectedPayload: [String: Any] = ["child": 1, "start": iso, "end": iso, "tags": []]
+        let rejected = LocalEntity(kind: .feeding, serverID: nil, childID: 1,
+                                   timestamp: Date(), payload: data(rejectedPayload), syncState: .pendingCreate)
+        context.insert(rejected)
+        let blocked = PendingMutation(localID: rejected.localID, kind: .feeding, op: .create,
+                                      payload: data(rejectedPayload))
+        blocked.fail("amount: [\"This field is required.\"]", blocked: true)
+        context.insert(blocked)
+
+        // A queued photo for the cached note (id 60) — pending work that used to be invisible here.
+        if let note = LocalStore.fetch(kind: .note, serverID: 60, in: context) {
+            context.insert(PendingImageUpload(localID: note.localID, kind: .note,
+                                              filename: "demo-pending.jpg", mimeType: "image/jpeg"))
         }
     }
 

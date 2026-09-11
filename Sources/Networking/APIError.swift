@@ -71,6 +71,41 @@ enum APIError: Error, Equatable {
         }
     }
 
+    /// What a sync queue should do with a row whose delivery just failed. The single place both
+    /// the mutation queue and the image-upload queue classify a failure, so the two can't drift
+    /// into contradictory retry behavior.
+    ///
+    /// The distinction that matters is *transport vs. verdict*: if the request never got an
+    /// answer, nothing has been learned about the payload and retrying is right. If the server
+    /// answered and rejected it, re-sending the same bytes will be rejected the same way.
+    enum QueueOutcome {
+        /// 401 — the token is dead. Invalidate the session; the whole queue waits for a new one.
+        case signOut
+        /// Offline, DNS, TLS, timeout, or 5xx. Connectivity or configuration state, not a verdict
+        /// on the payload — a self-signed certificate is fixed on the device, not in the record.
+        /// Stop the queue and retry the whole thing later.
+        case retryLater
+        /// The server answered and this exact payload can't succeed: a validation rejection, a
+        /// permission refusal, a missing target, or a body we can't parse. Park the row.
+        case blocked
+        /// Record the error but leave the row eligible. 409 keeps the established conflict
+        /// semantics, and an invalid URL resolves when the server setting is corrected — neither
+        /// is a property of the payload.
+        case recordAndRetry
+    }
+
+    var queueOutcome: QueueOutcome {
+        switch self {
+        case .unauthorized: return .signOut
+        case .offline, .server: return .retryLater
+        // `notFound` here is only what escapes `deliver()`'s own 404 handling — an image upload
+        // whose target is gone, or a create against an endpoint this server version lacks. The
+        // update/delete conflict and satisfied-delete paths intercept 404 before this.
+        case .forbidden, .notFound, .badRequest, .decoding: return .blocked
+        case .conflict, .invalidURL: return .recordAndRetry
+        }
+    }
+
     /// A server-side 5xx specifically (excludes `offline`). Used to skip a single failing kind
     /// during a bulk pull without aborting the whole sync, while still treating a lost
     /// connection as a hard stop.
