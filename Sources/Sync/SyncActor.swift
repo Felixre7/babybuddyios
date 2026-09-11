@@ -92,8 +92,12 @@ actor SyncActor {
 
     /// Pull the server's global tag list into the cache for the picker's autocomplete.
     /// Tags are low-volume and not child-scoped, so we pull all and reconcile deletions.
+    ///
+    /// The only caller that opts into an unpaginated bare-array response: some servers answer
+    /// `tags` that way, and because this list is small and un-windowed the whole collection
+    /// really does arrive in one body. See ``APIClient/splitPage(_:allowsUnpaginatedArray:)``.
     private func pullTags(client: APIClient) async throws {
-        let records = try await client.listAllRaw(path: "tags")
+        let records = try await client.listAllRaw(path: "tags", allowsUnpaginatedArray: true)
         var names = Set<String>()
         for record in records {
             guard let dto = try? APICoders.decoder.decode(TagDTO.self, from: record) else { continue }
