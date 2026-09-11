@@ -1,3 +1,4 @@
+import Foundation
 import XCTest
 @testable import BabyBuddy
 
@@ -55,5 +56,47 @@ final class MultipartFormTests: XCTestCase {
         XCTAssertEqual(EntityKind.child.imageField, "picture")
         XCTAssertNil(EntityKind.feeding.imageField)
         XCTAssertNil(EntityKind.timer.imageField)
+    }
+
+    // MARK: Detail-route lookup (children are routed by slug, everything else by id)
+
+    private func entity(_ kind: EntityKind, serverID: Int?, payload: [String: Any]) -> LocalEntity {
+        LocalEntity(kind: kind, serverID: serverID, childID: nil, timestamp: .now,
+                    payload: try! JSONSerialization.data(withJSONObject: payload),
+                    syncState: .synced)
+    }
+
+    func testChildLookupIsTheSlug() {
+        let child = entity(.child, serverID: 7, payload: ["id": 7, "slug": "maya-guy", "first_name": "Maya"])
+        XCTAssertEqual(child.detailLookup, "maya-guy")
+        // i.e. /api/children/maya-guy/, not /api/children/7/
+        XCTAssertNotEqual(child.detailLookup, "7")
+    }
+
+    func testNoteLookupStaysNumeric() {
+        let note = entity(.note, serverID: 42, payload: ["id": 42, "note": "hi"])
+        XCTAssertEqual(note.detailLookup, "42")
+        XCTAssertEqual(entity(.feeding, serverID: 9, payload: ["id": 9]).detailLookup, "9")
+    }
+
+    func testChildWithoutUsableSlugHasNoLookup() {
+        // No slug at all, and a slug that isn't a single safe path component: both must yield nil
+        // so the upload stays queued instead of falling back to the numeric URL.
+        XCTAssertNil(entity(.child, serverID: 7, payload: ["id": 7]).detailLookup)
+        XCTAssertNil(entity(.child, serverID: 7, payload: ["id": 7, "slug": ""]).detailLookup)
+        XCTAssertNil(entity(.child, serverID: 7, payload: ["id": 7, "slug": 3]).detailLookup)
+        XCTAssertNil(entity(.child, serverID: 7, payload: ["id": 7, "slug": "../../timers"]).detailLookup)
+        XCTAssertNil(entity(.child, serverID: 7, payload: ["id": 7, "slug": "a/b"]).detailLookup)
+    }
+
+    func testLookupsAreSinglePathComponents() {
+        XCTAssertTrue(APIClient.isSafeLookup("maya-guy"))
+        XCTAssertTrue(APIClient.isSafeLookup("maya_guy2"))
+        XCTAssertTrue(APIClient.isSafeLookup("153"))
+        // Anything that could restructure the URL, or that `appendingPathComponent` would
+        // double-encode, is rejected rather than escaped.
+        for bad in ["", "a/b", "..", ".", "a?b", "a#b", "a%2Fb", "a b", "a;b", "http://evil/x"] {
+            XCTAssertFalse(APIClient.isSafeLookup(bad), "should reject \(bad)")
+        }
     }
 }

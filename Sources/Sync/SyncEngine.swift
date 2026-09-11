@@ -86,16 +86,24 @@ final class SyncEngine {
         var delivered = false
         for upload in queue {
             guard let entity = LocalStore.fetch(localID: upload.localID, in: context),
-                  let serverID = entity.serverID, entity.syncState == .synced,
+                  entity.serverID != nil, entity.syncState == .synced,
                   let field = entity.kind.imageField else {
                 continue // target not ready (create not yet pushed, or has a pending edit)
             }
             guard let data = try? Data(contentsOf: ImageUploadStore.url(for: upload.filename)) else {
                 context.delete(upload); continue // bytes gone — drop the orphan
             }
+            // Children are addressed by slug, not by id. A cached child payload that has no usable
+            // one can't be PATCHed at all: keep the upload (and its bytes) queued rather than
+            // sending it to the numeric URL, which 404s and retries forever.
+            guard let lookup = entity.detailLookup else {
+                upload.attemptCount += 1
+                upload.lastError = "This child hasn't finished syncing from the server yet. Refresh, and the photo will upload on the next sync."
+                continue
+            }
             do {
                 let response = try await client.uploadImage(
-                    path: entity.kind.path, id: serverID, field: field,
+                    path: entity.kind.path, lookup: lookup, field: field,
                     filename: upload.filename, mimeType: upload.mimeType, data: data)
                 TimerPush.reconcile(response, into: entity)
                 ImageUploadStore.delete(upload.filename)

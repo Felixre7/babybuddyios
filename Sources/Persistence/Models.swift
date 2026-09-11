@@ -72,6 +72,15 @@ final class LocalEntity {
         return object
     }
 
+    /// The identifier this record's detail route is keyed by. Baby Buddy routes children by their
+    /// server-assigned `slug` (`lookup_field = "slug"`), every other kind by numeric id. `nil` when
+    /// the record has no usable one yet — callers must not substitute the other form, which 404s.
+    var detailLookup: String? {
+        guard kind == .child else { return serverID.map { String($0) } }
+        guard let slug = payloadObject["slug"] as? String, APIClient.isSafeLookup(slug) else { return nil }
+        return slug
+    }
+
     /// Parsed `start`/`end` payload dates (nil when absent or unparseable).
     var startEndDates: (start: Date?, end: Date?) {
         if let cached = datesCache, cached.data == payload { return (cached.start, cached.end) }
