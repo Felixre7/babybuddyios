@@ -107,9 +107,15 @@ final class SyncEngine {
             // Children are addressed by slug, not by id. A cached child payload that has no usable
             // one can't be PATCHed at all: keep the upload (and its bytes) queued rather than
             // sending it to the numeric URL, which 404s and retries forever.
+            //
+            // Blocked rather than left waiting, because this isn't a gap that closes on its own:
+            // children only ever enter the cache through a server pull, so a `.synced` child
+            // without a usable slug is a server that didn't supply one, and the next pull returns
+            // the same payload. Parking it puts the reason in Pending Changes with a Retry for the
+            // case that does fix it — the server itself changing.
             guard let lookup = entity.detailLookup else {
-                upload.attemptCount += 1
-                upload.lastError = "This child hasn't finished syncing from the server yet. Refresh, and the photo will upload on the next sync."
+                upload.fail("This child's record on the server is missing something the photo upload needs. Refresh, then tap Retry.",
+                            blocked: true)
                 continue
             }
             do {

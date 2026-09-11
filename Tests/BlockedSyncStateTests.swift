@@ -264,6 +264,46 @@ final class BlockedSyncStateTests: XCTestCase {
         ImageUploadStore.delete(upload.filename)
     }
 
+    /// A child the server never gave a usable slug can't be addressed at all. Children only ever
+    /// reach the cache through a pull, so the next sync would read back the same payload — parking
+    /// it surfaces the reason instead of re-deciding it forever. Crucially it must not fall back to
+    /// the numeric URL (the 404-forever bug #96 fixed) and must not throw away the photo.
+    func testChildWithoutUsableSlugBlocksWithoutSendingAnything() async {
+        let payload = data(["id": 3, "first_name": "Maya", "last_name": "Guy"])  // no `slug`
+        let child = LocalStore.upsertFromServer(payload, kind: .child, in: context)!
+        repo.enqueueImageUpload(for: child, imageData: Data("jpegbytes".utf8))
+        let upload = uploads()[0]
+
+        await engine.drainImageUploads()
+
+        XCTAssertTrue(upload.isBlocked)
+        XCTAssertEqual(upload.attemptCount, 1)
+        XCTAssertEqual(StubTransport.requests.count, 0, "nothing may be sent to the numeric URL")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: ImageUploadStore.url(for: upload.filename).path),
+                      "the photo is kept, not discarded")
+
+        for _ in 0..<4 { await engine.drainImageUploads() }
+        XCTAssertEqual(upload.attemptCount, 1, "the guard stops re-deciding on every sync")
+        XCTAssertEqual(StubTransport.requests.count, 0)
+
+        ImageUploadStore.delete(upload.filename)
+    }
+
+    /// The same child once the server does supply a slug: addressed by slug, never by id.
+    func testChildWithSlugUploadsToTheSlugRoute() async {
+        let payload = data(["id": 3, "slug": "maya-guy", "first_name": "Maya"])
+        let child = LocalStore.upsertFromServer(payload, kind: .child, in: context)!
+        repo.enqueueImageUpload(for: child, imageData: Data("jpegbytes".utf8))
+        StubTransport.reset([.init(status: 200, body: #"{"id":3,"slug":"maya-guy","picture":"https://s/p.jpg"}"#)])
+
+        await engine.drainImageUploads()
+
+        XCTAssertEqual(StubTransport.requests.count, 1)
+        XCTAssertTrue(try! XCTUnwrap(StubTransport.requests.first).url.hasSuffix("/api/children/maya-guy/"),
+                      "addressed by slug, not by id")
+        XCTAssertTrue(uploads().isEmpty, "delivered and cleared")
+    }
+
     /// A newer pick supersedes the blocked one — the user fixed it the obvious way.
     func testNewImageSelectionClearsBlockedState() async {
         let (entity, upload) = queueUpload()
