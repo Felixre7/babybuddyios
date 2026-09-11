@@ -123,6 +123,7 @@ struct EntityEditorView: View {
         sectioned(detailsTitle) { detailsCard }
         sectioned("Tags") { tagsCard }
         if showsNotes { sectioned("Notes") { notesCard } }
+        validationNotice
         actionButtons.padding(.top, 4)
     }
 
@@ -440,7 +441,7 @@ struct EntityEditorView: View {
     }
 
     private func adjustAmount(_ delta: Double) {
-        let next = max(0, (Double(amount) ?? 0) + delta)
+        let next = max(0, (ActivityDraft.number(amount) ?? 0) + delta)
         amount = trimmed(next)
     }
 
@@ -506,13 +507,36 @@ struct EntityEditorView: View {
 
     // MARK: Validation
 
-    private var isValid: Bool {
-        switch kind {
-        case .feeding, .sleep, .tummyTime, .pumping: return end >= start
-        case .note: return !noteText.trimmingCharacters(in: .whitespaces).isEmpty
-        case .weight, .height, .headCircumference, .bmi, .temperature: return Double(value) != nil
-        case .medication: return !medName.trimmingCharacters(in: .whitespaces).isEmpty
-        default: return true
+    /// The form's current contents, handed to ``ActivityDraft`` so the Baby Buddy rules the client
+    /// can check offline live in one testable place instead of a boolean inside the view.
+    private var draft: ActivityDraft {
+        ActivityDraft(kind: kind, start: start, end: end, time: time, date: date,
+                      amount: amount, value: value, dosage: dosage,
+                      noteText: noteText, medName: medName)
+    }
+
+    private var problem: ActivityProblem? { draft.problem }
+    private var isValid: Bool { problem == nil }
+
+    /// Why Save is disabled, inline above the Save button. Amber rather than red: nothing has gone
+    /// wrong yet, the entry just isn't something the server will take.
+    @ViewBuilder private var validationNotice: some View {
+        if let problem {
+            HStack(alignment: .top, spacing: 9) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 13))
+                    .foregroundStyle(BBColor.warning)
+                Text(problem.message)
+                    .font(.system(size: 14))
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 11)
+            .background(BBColor.warning.opacity(scheme == .dark ? 0.16 : 0.18),
+                        in: RoundedRectangle(cornerRadius: BBRadius.control, style: .continuous))
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("Can\u{2019}t save yet. \(problem.message)")
         }
     }
 
@@ -666,7 +690,7 @@ struct EntityEditorView: View {
         case .feeding:
             p["start"] = iso(start); p["end"] = iso(end)
             p["type"] = feedingType.rawValue; p["method"] = feedingMethod.rawValue
-            if let a = Double(amount) { p["amount"] = a }
+            if let a = ActivityDraft.number(amount) { p["amount"] = a }
             p["notes"] = notes; p["tags"] = tagList
         case .change:
             p["time"] = iso(time); p["wet"] = wet; p["solid"] = solid
@@ -680,22 +704,22 @@ struct EntityEditorView: View {
             p["milestone"] = milestone; p["tags"] = tagList
         case .pumping:
             p["start"] = iso(start); p["end"] = iso(end)
-            if let a = Double(amount) { p["amount"] = a }
+            if let a = ActivityDraft.number(amount) { p["amount"] = a }
             p["notes"] = notes; p["tags"] = tagList
         case .note:
             p["time"] = iso(time); p["note"] = noteText; p["tags"] = tagList
         case .weight, .height, .headCircumference, .bmi:
             let key = ["weight": "weight", "height": "height",
                        "headCircumference": "head_circumference", "bmi": "bmi"][kind.rawValue]!
-            p[key] = Double(value) ?? 0
+            p[key] = ActivityDraft.number(value) ?? 0
             p["date"] = APIDate.dateOnly.string(from: date)
             p["notes"] = notes; p["tags"] = tagList
         case .temperature:
-            p["temperature"] = Double(value) ?? 0; p["time"] = iso(time)
+            p["temperature"] = ActivityDraft.number(value) ?? 0; p["time"] = iso(time)
             p["notes"] = notes; p["tags"] = tagList
         case .medication:
             p["name"] = medName; p["time"] = iso(time)
-            if let d = Double(dosage) { p["dosage"] = d }
+            if let d = ActivityDraft.number(dosage) { p["dosage"] = d }
             p["dosage_unit"] = dosageUnit
             p["notes"] = notes; p["tags"] = tagList
         case .timer, .child:
