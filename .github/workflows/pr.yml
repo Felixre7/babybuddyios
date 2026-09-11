@@ -1,0 +1,138 @@
+name: PR
+
+on:
+  pull_request:
+
+# A new push cancels the in-flight run for the same PR.
+concurrency:
+  group: pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: read   # the attribution job reads the PR body
+
+jobs:
+  changes:
+    name: changes
+    runs-on: [self-hosted, Linux]
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Does this PR touch anything the app build depends on?
+        id: filter
+        # Anything not recognised as docs counts as code, so an unfamiliar path
+        # builds rather than slips through. `grep -v` without `-q`: ugrep (the
+        # Mac's grep) inverts `-vq` as a whole-input test, not per line.
+        run: |
+          CODE=$(git diff --name-only "origin/${{ github.base_ref }}...HEAD" \
+                 | grep -vE '\.md$|^Docs/|^\.github/(ISSUE_TEMPLATE/|pull_request_template)' | head -1)
+          if [ -n "$CODE" ]; then
+            echo "code=true" >> "$GITHUB_OUTPUT"; echo "touches $CODE (and maybe more): building"
+          else
+            echo "code=false" >> "$GITHUB_OUTPUT"; echo "docs-only PR: skipping the macOS build"
+          fi
+
+  build-and-test:
+    name: build-and-test
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    # Runs on the development Mac (scripts/runner.sh), not GitHub's metered macOS
+    # runners. If the Mac is asleep the job queues; the timeout stops a forgotten
+    # run from hanging forever.
+    runs-on: [self-hosted, macOS]
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install XcodeGen
+        run: command -v xcodegen >/dev/null || brew install xcodegen
+      # BabyBuddy.xcodeproj is gitignored — the project is generated from project.yml.
+      - name: Generate project
+        run: xcodegen generate
+      - name: Cache SwiftPM checkouts
+        uses: actions/cache@v4
+        with:
+          path: build/SourcePackages
+          key: spm-${{ runner.os }}-${{ hashFiles('project.yml') }}
+          restore-keys: spm-${{ runner.os }}-
+      # A simulator CI shares with a human aborts the run ("Test crashed with
+      # signal kill before establishing connection") the moment someone else
+      # starts a test on the same device. The Mac is a development machine, so CI
+      # gets its own device, created once and reused, on the newest iOS runtime.
+      - name: Pick a simulator
+        id: sim
+        run: |
+          UDID=$(python3 -c '
+          import json, subprocess, sys
+          NAME = "CI-BabyBuddy"
+          devs = json.loads(subprocess.check_output(
+              ["xcrun", "simctl", "list", "devices", "available", "--json"]))["devices"]
+          for rt, ds in sorted(devs.items(), reverse=True):
+              if "iOS" not in rt: continue
+              for d in ds:
+                  if d["name"] == NAME:
+                      print(d["udid"]); sys.exit()
+          for rt, ds in sorted(devs.items(), reverse=True):
+              if "iOS" not in rt: continue
+              for d in ds:
+                  if d["name"].startswith("iPhone"):
+                      print(subprocess.check_output(
+                          ["xcrun", "simctl", "create", NAME, d["deviceTypeIdentifier"], rt],
+                          text=True).strip())
+                      sys.exit()
+          sys.exit("no iPhone simulator available")
+          ')
+          echo "udid=$UDID" >> "$GITHUB_OUTPUT"
+          xcrun simctl list devices | grep "$UDID"
+      # The scheme builds BabyBuddyWidgets as a dependency, so this also catches an
+      # app-only import sneaking into Sources/Shared or Sources/Persistence, which
+      # compile into the widget target too. The runner's workspace is outside
+      # ~/Documents, so the iCloud xattr/codesigning trap doesn't apply here.
+      - name: Build and test
+        run: |
+          rm -rf build/Tests.xcresult   # the runner reuses its workspace
+          xcodebuild -project BabyBuddy.xcodeproj -scheme BabyBuddy \
+            -destination "id=${{ steps.sim.outputs.udid }}" \
+            -clonedSourcePackagesDirPath build/SourcePackages \
+            -resultBundlePath build/Tests.xcresult \
+            test CODE_SIGNING_ALLOWED=NO -quiet
+      # `-quiet` prints nothing on success, so a green run would otherwise never
+      # say how many tests ran — including if it ran none.
+      - name: Test summary
+        if: always()
+        run: |
+          xcrun xcresulttool get test-results summary --path build/Tests.xcresult --format json \
+            | python3 -c '
+          import json, sys
+          d = json.load(sys.stdin)
+          print("{result}: {passedTests}/{totalTestCount} passed, {failedTests} failed, {skippedTests} skipped".format(**d))
+          for t in d.get("testFailures", []):
+              print("  FAIL {}.{}: {}".format(t.get("targetName"), t.get("testName"), t.get("failureText")))
+          sys.exit(0 if d.get("failedTests", 1) == 0 and d.get("totalTestCount", 0) > 0 else 1)
+          '
+
+  attribution:
+    name: attribution
+    runs-on: [self-hosted, Linux]
+    env:
+      GH_TOKEN: ${{ github.token }}
+      PATTERN: '(?i)^(co-authored-by|signed-off-by):.*(claude|anthropic|codex|openai|copilot|cursor|gemini|devin|aider)|generated (with|by) \[?(claude|codex|copilot|cursor|gemini|aider)|claude\.com/claude-code|🤖 generated'
+    steps:
+      - name: PR body and commit messages carry no attribution
+        run: |
+          python3 - <<'PY'
+          import json, os, re, subprocess, sys
+          pat = re.compile(os.environ["PATTERN"], re.M)
+          repo = os.environ["GITHUB_REPOSITORY"]
+          num = json.load(open(os.environ["GITHUB_EVENT_PATH"]))["pull_request"]["number"]
+          body = subprocess.check_output(["gh", "pr", "view", str(num), "-R", repo, "--json", "body", "--jq", ".body"], text=True)
+          commits = subprocess.check_output(["gh", "api", f"repos/{repo}/pulls/{num}/commits", "--paginate", "--jq", ".[].commit.message"], text=True)
+          bad = [t for t in ("PR body", "commit message") if pat.search(body if t == "PR body" else commits)]
+          if bad:
+              print(f"::error::attribution trailer found in: {', '.join(bad)} (CLAUDE.md / global rule)")
+              sys.exit(1)
+          print("attribution: clean")
+          PY

@@ -14,6 +14,17 @@ An offline-first iOS client for a self-hosted [Baby Buddy](https://github.com/ba
 - The repo lives under `~/Documents`, which iCloud manages — it stamps `com.apple.FinderInfo` on the built `.appex` and codesigning then fails with "resource fork… detritus not allowed". **Build to a `-derivedDataPath` outside `~/Documents`.**
 - `Sources/Shared` and `Sources/Persistence` compile into the widget target too — keep app-only dependencies out of them.
 
+## CI
+
+- `.github/workflows/pr.yml` builds and tests every PR that touches code, on the
+  self-hosted runners: the Mac (`scripts/runner.sh`) for `build-and-test`, the Linux box
+  (`scripts/runner-linux.sh`) for the docs-only filter and the attribution check. A queued
+  macOS job usually means the Mac is asleep, not a CI fault.
+- CI runs `xcodegen generate` then `xcodebuild ... test CODE_SIGNING_ALLOWED=NO` against the
+  newest available iPhone simulator. The scheme builds the widget as a dependency, so an
+  app-only import added to `Sources/Shared` or `Sources/Persistence` fails there.
+- Docs-only PRs (`*.md`, `Docs/`) skip the macOS job. Any other path builds.
+
 ## UI
 
 - Design tokens live in `Sources/Shared/DesignSystem.swift` (`BBColor`, `BBFont`, `BBRadius`); shared components in `Sources/Features/Shared/DesignComponents.swift`. Use them rather than system styling — every screen is on the design system.
