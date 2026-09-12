@@ -331,14 +331,29 @@ struct BBFilledButton: ButtonStyle {
     var foreground: Color
 
     func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(.headline)
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 13)
-            .foregroundStyle(foreground)
-            .background(background, in: RoundedRectangle(cornerRadius: BBRadius.control, style: .continuous))
-            .opacity(configuration.isPressed ? 0.85 : 1)
-            .scaleEffect(configuration.isPressed ? 0.98 : 1)
+        Filled(configuration: configuration, background: background, foreground: foreground)
+    }
+
+    /// Nested so the style can read `isEnabled`: a `ButtonStyle` isn't a `View`, so it can't
+    /// observe the environment itself, and the explicit `foregroundStyle` below defeats the
+    /// automatic dimming. Without this a `.disabled` button stays full-strength and looks
+    /// tappable — it then appears to do nothing when tapped.
+    private struct Filled: View {
+        let configuration: ButtonStyleConfiguration
+        let background: Color
+        let foreground: Color
+        @Environment(\.isEnabled) private var isEnabled
+
+        var body: some View {
+            configuration.label
+                .font(.headline)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 13)
+                .foregroundStyle(foreground)
+                .background(background, in: RoundedRectangle(cornerRadius: BBRadius.control, style: .continuous))
+                .opacity(isEnabled ? (configuration.isPressed ? 0.85 : 1) : 0.4)
+                .scaleEffect(configuration.isPressed ? 0.98 : 1)
+        }
     }
 }
 
