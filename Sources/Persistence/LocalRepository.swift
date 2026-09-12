@@ -165,7 +165,7 @@ struct LocalRepository {
 
         func iso(_ d: Date) -> String { APIDate.isoDateTime.string(from: d) }
         if let s = p["start"] as? String, let e = p["end"] as? String,
-           let start = APIDate.parse(s), let end = APIDate.parse(e), end > start {
+           let start = APIDate.parse(s), let end = APIDate.parse(e), end >= start {
             let duration = end.timeIntervalSince(start)
             p["start"] = iso(now.addingTimeInterval(-duration))
             p["end"] = iso(now)
