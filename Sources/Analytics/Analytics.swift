@@ -377,6 +377,25 @@ extension Analytics {
         signal("Nudge.retired")
     }
 
+    /// Why ``APIClient/splitPage(_:allowsUnpaginatedArray:)`` couldn't read a list body, as a closed
+    /// vocabulary of category names. Only rejected shapes are listed — the two it accepts are not
+    /// reported, because a sync that works is not an error.
+    ///
+    /// A `decoding` failure on a list pull says only that the body wasn't understood, which isn't
+    /// enough to tell an older server shape worth supporting from a proxy page that isn't the API
+    /// at all. These names carry that distinction and nothing else — never the body, the URL, the
+    /// server, or any record's contents. `report` accepts a shape only by round-tripping it back
+    /// through this enum, so an arbitrary decoder message can never be reported as one.
+    enum ListShape: String {
+        /// A JSON object with no `results` array — an error envelope, or a shape we don't know.
+        case objectMissingResults
+        /// The body isn't JSON at all — an HTML login or proxy page is the usual cause.
+        case nonJSON
+        /// Valid JSON of a type that can't be a list of records: a scalar, an array where one
+        /// isn't accepted, or a list with a non-object row.
+        case unexpectedJSONType
+    }
+
     /// Coarse error reporting from API failures — category + a short, non-identifying reason.
     /// Never carries the server's message text (which could include user data).
     ///
@@ -385,7 +404,9 @@ extension Analytics {
     /// record otherwise looks like a flood of unrelated rejections. A terminal failure now blocks
     /// the queue row (see ``QueueDisposition``) and is reported once, on that transition, rather
     /// than on every sync — so a climbing `attempt` means real repeated failures, not a spin. For
-    /// a validation error `fields` names the keys the server complained about — never their values.
+    /// a validation error `fields` names the keys the server complained about — never their values;
+    /// for a list decode failure `shape` names the top-level response shape, from the closed
+    /// ``ListShape`` vocabulary.
     static func report(_ error: APIError, context: String? = nil, attempt: Int? = nil) {
         var parameters: [String: String] = [:]
         if let context { parameters["context"] = context }
@@ -408,8 +429,12 @@ extension Analytics {
         case .badRequest(let status, _, let fields):
             name = "Error.serverRejected"; parameters["reason"] = "badRequest-\(status)"
             if !fields.isEmpty { parameters["fields"] = fields.joined(separator: ",") }
-        case .decoding:
+        case .decoding(let detail):
             name = "Error.serverRejected"; parameters["reason"] = "decoding"
+            // `detail` is free text for most decode failures (a `DecodingError` description, which
+            // can quote decoded values), so it is reported only when it is exactly one of the
+            // closed ``ListShape`` names. Anything else is dropped rather than sent.
+            if let shape = ListShape(rawValue: detail) { parameters["shape"] = shape.rawValue }
         case .invalidURL:
             name = "Error.serverRejected"; parameters["reason"] = "invalidURL"
         }

@@ -101,7 +101,12 @@ final class APIClient {
     // typed DTOs, so these mirror the typed methods but pass `Data` through untouched.
 
     /// Fetch all pages of a collection as raw JSON objects (one `Data` per record).
-    func listAllRaw(path: String, query: ListQuery = ListQuery()) async throws -> [Data] {
+    ///
+    /// Pass `allowsUnpaginatedArray` only for a low-volume, un-windowed collection that some
+    /// servers return without a pagination envelope — see ``splitPage(_:allowsUnpaginatedArray:)``
+    /// for why it is not the default.
+    func listAllRaw(path: String, query: ListQuery = ListQuery(),
+                    allowsUnpaginatedArray: Bool = false) async throws -> [Data] {
         var query = query
         if query.limit == nil { query.limit = 100 }
         var offset = 0
@@ -110,7 +115,7 @@ final class APIClient {
             query.offset = offset
             let req = try makeRequest(path: "\(path)/", method: "GET", query: query.items())
             let data = try await sendRaw(req)
-            let (objects, hasNext) = try Self.splitPage(data)
+            let (objects, hasNext) = try Self.splitPage(data, allowsUnpaginatedArray: allowsUnpaginatedArray)
             all.append(contentsOf: objects)
             if !hasNext || objects.isEmpty { break }
             offset += objects.count
@@ -166,14 +171,59 @@ final class APIClient {
         _ = try await sendRaw(try makeRequest(path: "\(path)/\(id)/", method: "DELETE"))
     }
 
-    /// Split a DRF paginated list body into per-record JSON `Data` plus a has-next flag.
-    private static func splitPage(_ data: Data) throws -> (objects: [Data], hasNext: Bool) {
-        guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let results = root["results"] as? [Any] else {
-            throw APIError.decoding("Unexpected list response shape")
+    /// Split a list body into per-record JSON `Data` plus a has-next flag.
+    ///
+    /// The modern shape is DRF's `{ "results": [...], "next": … }`. Some Baby Buddy servers answer
+    /// `tags` with a bare top-level array and no pagination envelope; `allowsUnpaginatedArray`
+    /// accepts that as a single complete page.
+    ///
+    /// **That tolerance is opt-in per call rather than generic**, because a bare array carries no
+    /// `next` marker to distinguish "this is everything" from "this is page one". If a server did
+    /// paginate one, we would read the first page as the whole collection — and
+    /// ``SyncActor/pull(kind:client:windowDays:)`` reconciles deletions against exactly that set,
+    /// so every cached record past the first page would be deleted. Tags are low-volume, not
+    /// windowed, and the one endpoint observed answering this way, so only that path opts in.
+    ///
+    /// Every other shape stays a decoding failure. An unrecognized object must not be read as an
+    /// empty list: a proxy or captive-portal page would then look like a server with no tags, and
+    /// ``SyncActor/pullTags(client:)`` would delete the cached ones.
+    ///
+    /// The thrown detail is a ``Analytics/ListShape`` raw value — a closed category, never any
+    /// part of the body — so the failure is diagnosable without collecting response content.
+    static func splitPage(_ data: Data,
+                          allowsUnpaginatedArray: Bool = false) throws -> (objects: [Data], hasNext: Bool) {
+        // `.fragmentsAllowed` so a top-level scalar parses and is categorized as the wrong JSON
+        // type rather than being indistinguishable from an HTML error page.
+        guard let root = try? JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed]) else {
+            throw APIError.decoding(Analytics.ListShape.nonJSON.rawValue)
         }
-        let objects = try results.map { try JSONSerialization.data(withJSONObject: $0) }
-        return (objects, root["next"] is String)
+
+        let results: [Any]
+        let hasNext: Bool
+        switch root {
+        case let object as [String: Any]:
+            guard let page = object["results"] as? [Any] else {
+                throw APIError.decoding(Analytics.ListShape.objectMissingResults.rawValue)
+            }
+            results = page
+            hasNext = object["next"] is String
+        case let array as [Any] where allowsUnpaginatedArray:
+            results = array
+            hasNext = false
+        default:
+            throw APIError.decoding(Analytics.ListShape.unexpectedJSONType.rawValue)
+        }
+
+        // Every row has to be a JSON object before any of it is re-serialized: given anything else
+        // `data(withJSONObject:)` raises an ObjC `NSInvalidArgumentException`, which is not a Swift
+        // error and would take the app down rather than throw. A page with a non-object row isn't a
+        // page of records, so reject the body — reachable from either shape, but newly likely on a
+        // bare array, where a proxy answering `["…"]` is exactly the case being guarded.
+        guard let rows = results as? [[String: Any]] else {
+            throw APIError.decoding(Analytics.ListShape.unexpectedJSONType.rawValue)
+        }
+        let objects = try rows.map { try JSONSerialization.data(withJSONObject: $0) }
+        return (objects, hasNext)
     }
 
     /// Lightweight reachability + auth probe used during onboarding.

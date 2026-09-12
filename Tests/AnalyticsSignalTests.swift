@@ -187,6 +187,35 @@ final class AnalyticsSignalTests: XCTestCase {
         XCTAssertFalse(parameters.values.contains { $0.contains("Ollie") })
     }
 
+    /// A tag pull that can't read the response is the failure this dimension exists for: `decoding`
+    /// alone can't separate a server shape worth supporting from a proxy page, and the answer to
+    /// those two is completely different.
+    func testDecodingCarriesTheListShapeWhenSplitPageNamedOne() {
+        Analytics.report(.decoding(Analytics.ListShape.objectMissingResults.rawValue),
+                         context: "pull-tags")
+        XCTAssertEqual(recorder.parameters("Error.serverRejected"),
+                       ["reason": "decoding", "shape": "objectMissingResults",
+                        "context": "pull-tags"])
+    }
+
+    /// The privacy guarantee of `shape`: it is reported only when it round-trips through the closed
+    /// vocabulary. Every other decode failure carries a `DecodingError` description, which can
+    /// quote the value it choked on — so an unrecognized detail must be dropped, not sent.
+    func testDecodingNeverCarriesAFreeTextDetailAsAShape() {
+        Analytics.report(.decoding("No value associated with key notes (\"Ollie fed at Grandma's\")"))
+        let parameters = recorder.parameters("Error.serverRejected") ?? [:]
+        XCTAssertEqual(parameters, ["reason": "decoding"])
+        XCTAssertFalse(parameters.values.contains { $0.contains("Ollie") })
+    }
+
+    /// The shape names are a dashboard's x-axis, so they must stay distinct and stably spelled.
+    func testEveryListShapeIsDistinctAndSpelledAsExpected() {
+        let shapes: [Analytics.ListShape] = [.objectMissingResults, .nonJSON, .unexpectedJSONType]
+        XCTAssertEqual(shapes.map(\.rawValue),
+                       ["objectMissingResults", "nonJSON", "unexpectedJSONType"])
+        XCTAssertEqual(Set(shapes.map(\.rawValue)).count, shapes.count)
+    }
+
     /// Connectivity stays on `Error.network`; only the server's own refusals are "rejected".
     func testTransportFailuresAreNotServerRejections() {
         Analytics.report(.offline())
