@@ -50,18 +50,28 @@ struct LocalRepository {
     // MARK: Update
 
     func update(_ entity: LocalEntity, payload: [String: Any]) {
+        var payload = payload
+        let pending = pendingMutation(for: entity.localID)
+        // The editor rebuilds the body from its fields and never sets `timer`, so an edit would
+        // silently strip it and re-queue — the duplicate path "Create without timer" exists to
+        // gate. Carry the dead reference over and keep the row parked: the edit changes the
+        // record, not why it's blocked.
+        let keepsStaleTimer = pending?.isStaleTimer == true && entity.payloadObject["timer"] != nil
+        if keepsStaleTimer { payload["timer"] = entity.payloadObject["timer"] }
+
         guard let data = try? JSONSerialization.data(withJSONObject: payload) else { return }
         entity.payload = data
         entity.timestamp = entity.kind.timestamp(from: payload)
         entity.childID = entity.kind.childID(from: payload)
         entity.updatedAt = .now
 
-        if let pending = pendingMutation(for: entity.localID) {
+        if let pending {
             // Coalesce: keep the original op (create stays create), refresh the body.
             pending.payload = data
             // A blocked row is terminal for the payload that was rejected, not for the record.
-            // This is a different payload now, so it earns a fresh attempt.
-            pending.retryOnce()
+            // This is a different payload now, so it earns a fresh attempt — unless what was
+            // rejected is the timer reference this edit had to keep.
+            if !keepsStaleTimer { pending.retryOnce() }
         } else {
             entity.syncState = .pendingUpdate
             context.insert(PendingMutation(
@@ -119,6 +129,28 @@ struct LocalRepository {
         let activity = create(kind: kind, payload: body, source: .timerStop)
         removeLocally(timer)
         return activity
+    }
+
+    /// The user's explicit answer to ``QueueDisposition/blockedStaleTimer``: drop the dead `timer`
+    /// reference from both the queued body and the cached record (so they can't disagree about
+    /// what was sent), keep child/start/end exactly as chosen, and give the row one more try. The
+    /// duplicate warning lives in the UI — this method assumes it has been shown.
+    func createWithoutTimer(_ mutation: PendingMutation) {
+        guard mutation.isStaleTimer else { return }
+        func stripped(_ data: Data) -> Data? {
+            guard var obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+            obj.removeValue(forKey: "timer")
+            return try? JSONSerialization.data(withJSONObject: obj)
+        }
+        guard let body = stripped(mutation.payload) else { return }
+        mutation.payload = body
+        if let entity = LocalStore.fetch(localID: mutation.localID, in: context),
+           let cached = stripped(entity.payload) {
+            entity.payload = cached
+            entity.updatedAt = .now
+        }
+        mutation.retryOnce()
+        try? context.save()
     }
 
     // MARK: Repeat

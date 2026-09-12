@@ -178,7 +178,12 @@ final class SyncEngine {
                 switch error.queueOutcome {
                 case .signOut: session.signOut(clearLocalData: false); return delivered
                 case .retryLater: break mutations // offline/5xx: stop, retry whole queue later
-                case .blocked: mutation.fail(error.userMessage, blocked: true)
+                case .blocked:
+                    if Self.isStaleTimerRejection(mutation, error) {
+                        mutation.fail(Self.staleTimerMessage, disposition: .blockedStaleTimer)
+                    } else {
+                        mutation.fail(error.userMessage, blocked: true)
+                    }
                 case .recordAndRetry: mutation.fail(error.userMessage, blocked: false)
                 }
             } catch {
@@ -188,6 +193,18 @@ final class SyncEngine {
         try? context.save()
         return delivered
     }
+
+    /// A create the server refused on its write-only `timer` field and nothing else. Only that
+    /// exact shape is ambiguous-but-recoverable (see ``QueueDisposition/blockedStaleTimer``); a
+    /// body that also names another field (pumping's `amount` + `timer`) has a real validation
+    /// problem too, so it stays plainly blocked with both reasons in `lastError` and no
+    /// create-without-timer shortcut.
+    static func isStaleTimerRejection(_ mutation: PendingMutation, _ error: APIError) -> Bool {
+        guard mutation.op == .create, case .badRequest(_, _, let fields) = error else { return false }
+        return fields == ["timer"]
+    }
+
+    nonisolated static let staleTimerMessage = "The timer this was logged from no longer exists on the server. It may already have been saved from another device — check before creating it again."
 
     /// Delivers one mutation. Returns `true` when it performed an actual server write (POST/
     /// PATCH/DELETE), `false` when it raised a conflict or only cleaned up locally.
