@@ -50,18 +50,28 @@ struct LocalRepository {
     // MARK: Update
 
     func update(_ entity: LocalEntity, payload: [String: Any]) {
+        var payload = payload
+        let pending = pendingMutation(for: entity.localID)
+        // The editor rebuilds the body from its fields and never sets `timer`, so an edit would
+        // silently strip it and re-queue — the duplicate path "Create without timer" exists to
+        // gate. Carry the dead reference over and keep the row parked: the edit changes the
+        // record, not why it's blocked.
+        let keepsStaleTimer = pending?.isStaleTimer == true && entity.payloadObject["timer"] != nil
+        if keepsStaleTimer { payload["timer"] = entity.payloadObject["timer"] }
+
         guard let data = try? JSONSerialization.data(withJSONObject: payload) else { return }
         entity.payload = data
         entity.timestamp = entity.kind.timestamp(from: payload)
         entity.childID = entity.kind.childID(from: payload)
         entity.updatedAt = .now
 
-        if let pending = pendingMutation(for: entity.localID) {
+        if let pending {
             // Coalesce: keep the original op (create stays create), refresh the body.
             pending.payload = data
             // A blocked row is terminal for the payload that was rejected, not for the record.
-            // This is a different payload now, so it earns a fresh attempt.
-            pending.retryOnce()
+            // This is a different payload now, so it earns a fresh attempt — unless what was
+            // rejected is the timer reference this edit had to keep.
+            if !keepsStaleTimer { pending.retryOnce() }
         } else {
             entity.syncState = .pendingUpdate
             context.insert(PendingMutation(

@@ -344,6 +344,37 @@ final class BlockedSyncStateTests: XCTestCase {
         XCTAssertEqual(json(create.payload)["timer"] as? Int, 42)
     }
 
+    /// The editor rebuilds payloads from its fields and never sets `timer`. Saving an edit to a
+    /// stale-timer activity must not turn into a silent create-without-timer: the reference is
+    /// carried over, the row stays parked, and nothing goes out until the user decides.
+    func testEditingStaleTimerRowKeepsTimerAndStaysParked() async {
+        let (activity, create) = queueTimerConversion()
+        StubTransport.reset([.init(status: 400, body: Self.timerRejection)])
+        await engine.pushPending()
+        XCTAssertTrue(create.isStaleTimer)
+
+        // An editor save: same record, no `timer` key, one field changed.
+        repo.update(activity, payload: ["child": 1, "start": iso, "end": "2024-01-15T10:15:00-05:00",
+                                        "milestone": "Rolled over", "tags": []])
+
+        XCTAssertEqual(json(create.payload)["timer"] as? Int, 42, "the dead reference is kept in the queued body")
+        XCTAssertEqual(activity.payloadObject["timer"] as? Int, 42, "and in the cached record")
+        XCTAssertEqual(activity.payloadObject["milestone"] as? String, "Rolled over", "the edit itself lands")
+        XCTAssertTrue(create.isStaleTimer, "still parked: the edit didn't change why")
+        XCTAssertEqual(create.lastError, SyncEngine.staleTimerMessage)
+
+        for _ in 0..<3 { await engine.pushPending() }
+        XCTAssertEqual(StubTransport.requests.count, 1, "nothing is sent behind the user's back")
+
+        // The explicit choice still works afterwards, on the edited body.
+        StubTransport.reset([.init(status: 201, body: #"{"id":80,"child":1,"start":"2024-01-15T10:00:00-05:00","milestone":"Rolled over"}"#)])
+        repo.createWithoutTimer(create)
+        await engine.pushPending()
+        XCTAssertEqual(StubTransport.requests.count, 1)
+        XCTAssertTrue(mutations().isEmpty)
+        XCTAssertEqual(activity.payloadObject["milestone"] as? String, "Rolled over")
+    }
+
     /// Pumping's `amount` + `timer` cluster: two problems, so it stays plainly blocked with both
     /// visible and no create-without-timer path.
     func testAmountAndTimerRejectionStaysPlainBlockedWithBothReasons() async {
