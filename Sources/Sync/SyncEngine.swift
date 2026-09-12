@@ -70,28 +70,76 @@ final class SyncEngine {
         guard !isSyncing else { return }
         isSyncing = true
         defer { isSyncing = false }
-        let pushed = await pushPending()
+        let push = await pushPending()
         // Image uploads drain after the mutation queue so a just-created record already has its
         // serverID (a multipart PATCH needs it).
-        let uploaded = await drainImageUploads()
+        let uploads = await drainImageUploads()
         let pulledChanges = await pullAll()
+        let changed = push.delivered > 0 || uploads.delivered > 0 || pulledChanges
         // Only report a sync that actually did work — most syncs (foreground, pull-to-refresh,
         // after each timer action, background) are no-ops, which would otherwise be pure noise.
-        if pushed || uploaded || pulledChanges { Analytics.syncCompleted() }
+        if changed { Analytics.syncCompleted() }
+        reportOutcome(push, uploads, changed: changed)
+    }
+
+    /// What one pass over a queue did. `Sync.completed` says only "something moved", which a
+    /// permanently blocked row can coexist with forever; these are the facts that separate a
+    /// drained sync from a partial one. Counts and flags only — never what was in the payload.
+    struct QueueRun {
+        /// Rows actually delivered to the server this pass.
+        var delivered = 0
+        /// Rows this pass parked (see ``QueueDisposition``) — the transition, not the backlog.
+        var blockedNew = 0
+        /// The pass stopped early on a retryable failure (offline / 5xx), so the rest of the queue
+        /// was never attempted.
+        var stoppedRetryable = false
+    }
+
+    /// Emit `Sync.finished` — one bounded outcome per sync that did work or found work waiting.
+    ///
+    /// Deliberately alongside `Sync.completed` rather than replacing it: that signal backs an
+    /// existing dashboard, and its meaning ("something changed") is unchanged here.
+    ///
+    /// Same no-op suppression as `Sync.completed`: a sync that moved nothing and has nothing
+    /// queued is silent, which is most of them. `transientFailure` covers only the push/upload
+    /// queues stopping early — a failed *pull* reports itself through ``SyncActor`` with its own
+    /// category, and has no queue state to describe.
+    private func reportOutcome(_ push: QueueRun, _ uploads: QueueRun, changed: Bool) {
+        let census = queueCensus()
+        guard changed || census.queued > 0 || census.blocked > 0 else { return }
+        let outcome: Analytics.SyncOutcome =
+            if push.stoppedRetryable || uploads.stoppedRetryable { .transientFailure }
+            else if census.blocked > 0 { .partialBlocked }
+            else if census.queued > 0 { .changedWithPendingWork }
+            else { .drained }
+        Analytics.syncFinished(outcome: outcome,
+                               delivered: push.delivered, uploaded: uploads.delivered,
+                               blockedNew: push.blockedNew + uploads.blockedNew,
+                               blockedTotal: census.blocked, queued: census.queued)
+    }
+
+    /// Both queues after this sync saved: rows still eligible for automatic delivery, and rows
+    /// parked until the user retries them.
+    private func queueCensus() -> (queued: Int, blocked: Int) {
+        let parked = ((try? context.fetch(FetchDescriptor<PendingMutation>())) ?? []).map(\.isBlocked)
+            + ((try? context.fetch(FetchDescriptor<PendingImageUpload>())) ?? []).map(\.isBlocked)
+        let blocked = parked.filter { $0 }.count
+        return (parked.count - blocked, blocked)
     }
 
     /// Deliver queued image uploads (child pictures / note images) as multipart `PATCH`es. Each
     /// runs only once its target record is fully synced (has a `serverID`, no pending text write),
-    /// so the image PATCH can't clobber an un-pushed edit. Returns whether any upload was delivered.
+    /// so the image PATCH can't clobber an un-pushed edit. Returns what the pass did, so `sync()`
+    /// can describe its outcome.
     @discardableResult
-    func drainImageUploads() async -> Bool {
+    func drainImageUploads() async -> QueueRun {
+        var run = QueueRun()
         #if DEBUG
-        if session.isDemo { return false }
+        if session.isDemo { return run }
         #endif
-        guard let client = apiClient else { return false }
+        guard let client = apiClient else { return run }
         let queue = (try? context.fetch(
             FetchDescriptor<PendingImageUpload>(sortBy: [SortDescriptor(\.createdAt)]))) ?? []
-        var delivered = false
         uploads: for upload in queue {
             // Parked by a terminal rejection: still queued and visible in Pending Changes, but
             // not re-sent until the user explicitly retries it.
@@ -116,6 +164,7 @@ final class SyncEngine {
             guard let lookup = entity.detailLookup else {
                 upload.fail("This child's record on the server is missing something the photo upload needs. Refresh, then tap Retry.",
                             blocked: true)
+                run.blockedNew += 1
                 continue
             }
             do {
@@ -125,16 +174,20 @@ final class SyncEngine {
                 TimerPush.reconcile(response, into: entity)
                 ImageUploadStore.delete(upload.filename)
                 context.delete(upload)
-                delivered = true
+                run.delivered += 1
             } catch let error as APIError {
                 // Reported here, once per real attempt. A row that blocks is skipped from now on,
                 // so this fires on the transition rather than on every sync that walks past it.
                 Analytics.report(error, context: "upload-\(entity.kind.rawValue)",
                                  attempt: upload.attemptCount)
                 switch error.queueOutcome {
-                case .signOut: session.signOut(clearLocalData: false); return delivered
-                case .retryLater: break uploads // offline/5xx: retry the whole queue later
-                case .blocked: upload.fail(error.userMessage, blocked: true)
+                case .signOut: session.signOut(clearLocalData: false); return run
+                case .retryLater:
+                    run.stoppedRetryable = true
+                    break uploads // offline/5xx: retry the whole queue later
+                case .blocked:
+                    upload.fail(error.userMessage, blocked: true)
+                    run.blockedNew += 1
                 case .recordAndRetry: upload.fail(error.userMessage, blocked: false)
                 }
             } catch {
@@ -142,22 +195,22 @@ final class SyncEngine {
             }
         }
         try? context.save()
-        return delivered
+        return run
     }
 
     /// Drain the pending-mutation queue oldest-first. Conflict detection is layered on in
     /// Phase 5; for now updates/deletes are delivered directly.
-    /// Returns whether at least one mutation was actually delivered to the server (so callers can
-    /// tell a meaningful sync from a no-op one). Conflicts don't count as delivered.
+    /// Returns what the pass did (so callers can tell a meaningful sync from a no-op one, and
+    /// `sync()` can describe its outcome). Conflicts don't count as delivered.
     @discardableResult
-    func pushPending() async -> Bool {
+    func pushPending() async -> QueueRun {
+        var run = QueueRun()
         #if DEBUG
-        if session.isDemo { return false }
+        if session.isDemo { return run }
         #endif
-        guard let client = apiClient else { return false }
+        guard let client = apiClient else { return run }
         let queue = (try? context.fetch(
             FetchDescriptor<PendingMutation>(sortBy: [SortDescriptor(\.createdAt)]))) ?? []
-        var delivered = false
         mutations: for mutation in queue {
             // Parked by a terminal rejection. Skipped rather than aborting the loop, so one poison
             // record doesn't hold up every write queued behind it.
@@ -169,21 +222,24 @@ final class SyncEngine {
                 continue
             }
             do {
-                if try await deliver(mutation, client: client) { delivered = true }
+                if try await deliver(mutation, client: client) { run.delivered += 1 }
             } catch let error as APIError {
                 // Reported here, once per real attempt. A row that blocks is skipped from now on,
                 // so this fires on the transition rather than on every sync that walks past it.
                 Analytics.report(error, context: "push-\(mutation.op.rawValue)-\(mutation.kind.rawValue)",
                                  attempt: mutation.attemptCount)
                 switch error.queueOutcome {
-                case .signOut: session.signOut(clearLocalData: false); return delivered
-                case .retryLater: break mutations // offline/5xx: stop, retry whole queue later
+                case .signOut: session.signOut(clearLocalData: false); return run
+                case .retryLater:
+                    run.stoppedRetryable = true
+                    break mutations // offline/5xx: stop, retry whole queue later
                 case .blocked:
                     if Self.isStaleTimerRejection(mutation, error) {
                         mutation.fail(Self.staleTimerMessage, disposition: .blockedStaleTimer)
                     } else {
                         mutation.fail(error.userMessage, blocked: true)
                     }
+                    run.blockedNew += 1
                 case .recordAndRetry: mutation.fail(error.userMessage, blocked: false)
                 }
             } catch {
@@ -191,7 +247,7 @@ final class SyncEngine {
             }
         }
         try? context.save()
-        return delivered
+        return run
     }
 
     /// A create the server refused on its write-only `timer` field and nothing else. Only that

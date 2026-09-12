@@ -166,6 +166,42 @@ extension Analytics {
         signal("Sync.completed")
     }
 
+    /// How a sync ended, as a closed vocabulary. ``syncCompleted()`` says only that something
+    /// moved, which a permanently parked queue row can coexist with on every sync forever — these
+    /// four tell those cases apart.
+    enum SyncOutcome: String {
+        /// Everything queued went out; nothing is left waiting.
+        case drained
+        /// Rows are parked (see ``QueueDisposition``) and will not be retried without the user.
+        case partialBlocked
+        /// A queue stopped early on a retryable failure (offline / 5xx); the rest was untried.
+        case transientFailure
+        /// No blocked rows, but work is still queued and eligible — an image whose record isn't
+        /// synced yet, or a create the widget extension had claimed.
+        case changedWithPendingWork
+    }
+
+    /// The outcome of one sync run, alongside the unchanged ``syncCompleted()``.
+    ///
+    /// Emitted once per sync that did work or found work waiting; a pure no-op sync stays silent,
+    /// like `Sync.completed`. Everything here is a closed category or a count of queue rows —
+    /// never a record kind list, an identifier, or anything from a payload or response.
+    ///
+    /// `blockedNew` counts rows this sync *parked* (the same transition ``report(_:context:attempt:)``
+    /// fires on); `blockedTotal` is the standing backlog afterwards, and `queued` the rows still
+    /// eligible for a later automatic attempt.
+    static func syncFinished(outcome: SyncOutcome, delivered: Int, uploaded: Int,
+                             blockedNew: Int, blockedTotal: Int, queued: Int) {
+        signal("Sync.finished", parameters: [
+            "outcome": outcome.rawValue,
+            "delivered": String(delivered),
+            "uploaded": String(uploaded),
+            "blockedNew": String(blockedNew),
+            "blockedTotal": String(blockedTotal),
+            "queued": String(queued),
+        ])
+    }
+
     /// A push raised a conflict that needs user resolution.
     static func syncConflictRaised(kind: String, op: String) {
         signal("Sync.conflictRaised", parameters: ["kind": kind, "op": op])
