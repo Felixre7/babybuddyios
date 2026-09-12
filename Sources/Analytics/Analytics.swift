@@ -381,10 +381,11 @@ extension Analytics {
     /// Never carries the server's message text (which could include user data).
     ///
     /// `context` is *where* it happened (`push-create-pumping`, `upload-note`) and `attempt` how
-    /// many times that same queued item has already failed. Both exist because the push queue
-    /// retries a non-retryable failure on every sync: without them one un-deliverable record looks
-    /// like a flood of unrelated rejections. For a validation error `fields` names the keys the
-    /// server complained about — never their values.
+    /// many times that same queued item has already failed. Both exist because one un-deliverable
+    /// record otherwise looks like a flood of unrelated rejections. A terminal failure now blocks
+    /// the queue row (see ``QueueDisposition``) and is reported once, on that transition, rather
+    /// than on every sync — so a climbing `attempt` means real repeated failures, not a spin. For
+    /// a validation error `fields` names the keys the server complained about — never their values.
     static func report(_ error: APIError, context: String? = nil, attempt: Int? = nil) {
         var parameters: [String: String] = [:]
         if let context { parameters["context"] = context }

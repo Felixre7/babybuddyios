@@ -20,6 +20,9 @@ struct SettingsView: View {
     @Query(filter: #Predicate<LocalEntity> { $0.kindRaw == "child" }, sort: \.timestamp)
     private var children: [LocalEntity]
     @Query private var pendingMutations: [PendingMutation]
+    /// Queued photo uploads count as pending work too — they were invisible here, so a stuck
+    /// upload sat behind an "All synced" row with no way to see or discard it.
+    @Query private var pendingUploads: [PendingImageUpload]
     @Query private var conflicts: [ConflictRecord]
 
     // Shared with the Dashboard/Timeline tabs and the widget, so "Switch" here moves them too.
@@ -147,7 +150,7 @@ struct SettingsView: View {
                 Text("Attach your device model, iOS version, and app version to help us investigate? Nothing else is shared.")
             }
             .fullScreenCover(isPresented: $showingSignOut) {
-                SignOutDialog(host: serverHost, pendingCount: pendingMutations.count,
+                SignOutDialog(host: serverHost, pendingCount: pendingCount,
                               onCancel: { setSignOutDialog(false) },
                               onSignOut: { setSignOutDialog(false); session.signOut() })
                     .presentationBackground(.clear)
@@ -292,19 +295,30 @@ struct SettingsView: View {
         }
     }
 
+    /// Everything waiting to reach the server: queued record writes and queued photo uploads.
+    private var pendingCount: Int { pendingMutations.count + pendingUploads.count }
+
+    /// Whether any queued item was refused in a way sync won't keep retrying — those need the
+    /// user, so the row says so rather than implying it will clear itself.
+    private var hasBlocked: Bool {
+        pendingMutations.contains(where: \.isBlocked) || pendingUploads.contains(where: \.isBlocked)
+    }
+
     /// Pending writes open the queue when any exist; otherwise the row reads "All synced".
     @ViewBuilder private var pendingRow: some View {
-        if pendingMutations.isEmpty {
+        if pendingCount == 0 {
             SettingsRow(symbol: "checkmark.icloud", tint: BBColor.success, title: "Pending changes") {
                 Text("All synced")
                     .font(.subheadline.weight(.medium)).foregroundStyle(BBColor.success)
             }
         } else {
+            let tint = hasBlocked ? BBColor.danger : BBColor.warning
             Button { showingPending = true } label: {
-                SettingsRow(symbol: "icloud.and.arrow.up", tint: BBColor.warning, title: "Pending changes") {
+                SettingsRow(symbol: hasBlocked ? "exclamationmark.icloud" : "icloud.and.arrow.up",
+                            tint: tint, title: "Pending changes") {
                     HStack(spacing: 4) {
-                        Text("\(pendingMutations.count) queued")
-                            .font(.subheadline.weight(.medium)).foregroundStyle(BBColor.warning)
+                        Text(hasBlocked ? "\(pendingCount) need attention" : "\(pendingCount) queued")
+                            .font(.subheadline.weight(.medium)).foregroundStyle(tint)
                         Image(systemName: "chevron.right")
                             .font(.system(size: 13, weight: .semibold)).foregroundStyle(.tertiary)
                     }

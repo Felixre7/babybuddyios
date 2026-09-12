@@ -111,9 +111,58 @@ final class CachedTag {
     }
 }
 
+/// Why a queued item isn't currently eligible for automatic delivery.
+///
+/// Stored as an optional raw string so rows written before this existed migrate in as `nil` —
+/// the waiting state — without a versioned schema. `nil` is deliberately the safe default: a
+/// queue row is eligible unless something told us otherwise.
+enum QueueDisposition: String, Codable {
+    /// The server answered, and re-sending this exact payload cannot succeed (a validation
+    /// rejection, a permission refusal, a response we can't parse). The row stays queued and
+    /// visible in Pending Changes, but automatic syncs skip it until the user asks to retry.
+    /// Without this, one poison record is re-sent on every foreground, pull-to-refresh, timer
+    /// action, and background sync — hundreds of identical rejections for a single bad row.
+    case blocked
+}
+
+/// The two queue models share a failure lifecycle: attempts, the last user-safe message, and
+/// whether the row has been parked. Factored out so the mutation queue and the image-upload
+/// queue can't drift into contradictory retry behavior.
+protocol QueueItem: AnyObject {
+    var dispositionRaw: String? { get set }
+    var attemptCount: Int { get set }
+    var lastError: String? { get set }
+}
+
+extension QueueItem {
+    var disposition: QueueDisposition? {
+        get { dispositionRaw.flatMap(QueueDisposition.init(rawValue:)) }
+        set { dispositionRaw = newValue?.rawValue }
+    }
+
+    /// Whether automatic syncs should skip this row.
+    var isBlocked: Bool { disposition == .blocked }
+
+    /// Record a failed delivery. `blocked` parks the row: still queued, still visible, but no
+    /// longer sent automatically.
+    func fail(_ message: String, blocked: Bool) {
+        attemptCount += 1
+        lastError = message
+        if blocked { disposition = .blocked }
+    }
+
+    /// Make a parked row eligible for one more automatic attempt. If that attempt fails the same
+    /// way it blocks again, so "Retry" buys exactly one try rather than resuming the old spin.
+    /// `attemptCount` keeps accumulating — it's the row's lifetime total, not a per-retry budget.
+    func retryOnce() {
+        disposition = nil
+        lastError = nil
+    }
+}
+
 /// An ordered, persisted write awaiting delivery to the server.
 @Model
-final class PendingMutation {
+final class PendingMutation: QueueItem {
     @Attribute(.unique) var id: UUID
     var localID: UUID          // links to the LocalEntity
     var kindRaw: String
@@ -123,6 +172,8 @@ final class PendingMutation {
     var serverID: Int?         // set for update/delete
     var attemptCount: Int
     var lastError: String?
+    /// ``QueueDisposition`` rawValue; `nil` (the default for pre-existing rows) means waiting.
+    var dispositionRaw: String?
     var createdAt: Date
     /// When another process (the widget/intents extension) started delivering this mutation,
     /// so the app's push loop can skip it briefly and avoid a double-send. `nil` = unclaimed.
@@ -139,6 +190,7 @@ final class PendingMutation {
         self.serverID = serverID
         self.attemptCount = 0
         self.lastError = nil
+        self.dispositionRaw = nil
         self.createdAt = createdAt
         self.claimedAt = nil
     }
@@ -154,7 +206,7 @@ final class PendingMutation {
 /// bytes live on disk (see ``ImageUploadStore``) referenced by `filename`, so large blobs stay out
 /// of the SwiftData store; that same file also backs the record's local `file://` preview.
 @Model
-final class PendingImageUpload {
+final class PendingImageUpload: QueueItem {
     @Attribute(.unique) var id: UUID
     var localID: UUID          // the LocalEntity to attach the image to
     var kindRaw: String        // .note or .child
@@ -162,6 +214,8 @@ final class PendingImageUpload {
     var mimeType: String
     var attemptCount: Int
     var lastError: String?
+    /// ``QueueDisposition`` rawValue; `nil` (the default for pre-existing rows) means waiting.
+    var dispositionRaw: String?
     var createdAt: Date
 
     init(localID: UUID, kind: EntityKind, filename: String, mimeType: String, createdAt: Date = .now) {
@@ -172,6 +226,7 @@ final class PendingImageUpload {
         self.mimeType = mimeType
         self.attemptCount = 0
         self.lastError = nil
+        self.dispositionRaw = nil
         self.createdAt = createdAt
     }
 
