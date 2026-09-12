@@ -45,7 +45,9 @@ designed to be **anonymous and non-attributed**:
     (Face ID / Touch ID / none).
   - **Sync & errors** — that a sync completed, that a conflict was raised, and that a conflict was
     resolved together with which way it was settled (keep mine / use server / merge) and the record
-    kind; plus coarse error categories (e.g. network vs. server-rejected) together with which sync
+    kind; how a sync ended (everything sent, some items held back, stopped on a temporary problem)
+    and how many queued items were sent or are still waiting — counts only, never which records or
+    what they contain; plus coarse error categories (e.g. network vs. server-rejected) together with which sync
     step hit them (such as "push-create-feeding"), how many times that queued item has already
     failed, and — for a validation error — the *names* of the fields the server objected to.
     A failed sign-in is reported the same way, as a category only — never the address or token
