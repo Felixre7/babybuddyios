@@ -121,6 +121,28 @@ struct LocalRepository {
         return activity
     }
 
+    /// The user's explicit answer to ``QueueDisposition/blockedStaleTimer``: drop the dead `timer`
+    /// reference from both the queued body and the cached record (so they can't disagree about
+    /// what was sent), keep child/start/end exactly as chosen, and give the row one more try. The
+    /// duplicate warning lives in the UI — this method assumes it has been shown.
+    func createWithoutTimer(_ mutation: PendingMutation) {
+        guard mutation.isStaleTimer else { return }
+        func stripped(_ data: Data) -> Data? {
+            guard var obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+            obj.removeValue(forKey: "timer")
+            return try? JSONSerialization.data(withJSONObject: obj)
+        }
+        guard let body = stripped(mutation.payload) else { return }
+        mutation.payload = body
+        if let entity = LocalStore.fetch(localID: mutation.localID, in: context),
+           let cached = stripped(entity.payload) {
+            entity.payload = cached
+            entity.updatedAt = .now
+        }
+        mutation.retryOnce()
+        try? context.save()
+    }
+
     // MARK: Repeat
 
     /// Re-log an existing event as a fresh record stamped to `now`: copies the payload, drops

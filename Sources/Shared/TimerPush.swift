@@ -13,20 +13,24 @@ enum TimerPush {
     static let claimWindow: TimeInterval = 30
 
     /// Deliver the pending create for `localID` now, if signed in. Best-effort and silent.
+    ///
+    /// A parked row (``QueueItem/isBlocked``) is never sent from here: the app owns that verdict
+    /// and the user's recovery choice, and a stale-timer create in particular must go out at most
+    /// once more, on the user's say-so. The extension only ever pushes what it just created.
     @MainActor
-    static func pushCreate(localID: UUID, in context: ModelContext) async {
-        guard let config = KeychainStore.load() else { return }
+    static func pushCreate(localID: UUID, in context: ModelContext,
+                           client: APIClient? = KeychainStore.load().map { APIClient(config: $0) }) async {
+        guard let client else { return }
         let descriptor = FetchDescriptor<PendingMutation>(
             predicate: #Predicate { $0.localID == localID && $0.opRaw == "create" })
-        guard let mutation = try? context.fetch(descriptor).first,
+        guard let mutation = try? context.fetch(descriptor).first, !mutation.isBlocked,
               let entity = LocalStore.fetch(localID: localID, in: context) else { return }
 
         mutation.claimedAt = .now // tell the app's push loop to skip this briefly
         try? context.save()
 
         do {
-            let response = try await APIClient(config: config)
-                .createRaw(path: mutation.kind.path, body: mutation.payload)
+            let response = try await client.createRaw(path: mutation.kind.path, body: mutation.payload)
             reconcile(response, into: entity)
             context.delete(mutation)
             try? context.save()

@@ -123,6 +123,13 @@ enum QueueDisposition: String, Codable {
     /// Without this, one poison record is re-sent on every foreground, pull-to-refresh, timer
     /// action, and background sync — hundreds of identical rejections for a single bad row.
     case blocked
+    /// A *create* the server refused only on its write-only `timer` field: the timer it was
+    /// logged from no longer exists there. That is ambiguous — another device may have stopped
+    /// the timer, or our own POST may have succeeded (which deletes the timer) with the response
+    /// lost. Re-sending is safe (the same rejection comes back); stripping `timer` and re-sending
+    /// is not, because it can create a duplicate. So the row parks like ``blocked`` and the user
+    /// gets an explicit "create without timer" alongside Retry and Discard.
+    case blockedStaleTimer
 }
 
 /// The two queue models share a failure lifecycle: attempts, the last user-safe message, and
@@ -140,15 +147,22 @@ extension QueueItem {
         set { dispositionRaw = newValue?.rawValue }
     }
 
-    /// Whether automatic syncs should skip this row.
-    var isBlocked: Bool { disposition == .blocked }
+    /// Whether automatic syncs should skip this row. Every disposition parks the row; they differ
+    /// only in what recovery the UI offers.
+    var isBlocked: Bool { disposition != nil }
+    var isStaleTimer: Bool { disposition == .blockedStaleTimer }
 
     /// Record a failed delivery. `blocked` parks the row: still queued, still visible, but no
     /// longer sent automatically.
     func fail(_ message: String, blocked: Bool) {
+        fail(message, disposition: blocked ? .blocked : nil)
+    }
+
+    /// Record a failed delivery under a specific disposition (`nil` leaves the row eligible).
+    func fail(_ message: String, disposition: QueueDisposition?) {
         attemptCount += 1
         lastError = message
-        if blocked { disposition = .blocked }
+        if let disposition { self.disposition = disposition }
     }
 
     /// Make a parked row eligible for one more automatic attempt. If that attempt fails the same

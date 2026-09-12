@@ -119,6 +119,17 @@ enum DemoData {
         blocked.fail("amount: [\"This field is required.\"]", blocked: true)
         context.insert(blocked)
 
+        // A timer conversion whose server timer is gone: Retry and "Create without timer".
+        let stalePayload: [String: Any] = ["child": 1, "timer": 999, "start": iso, "end": iso,
+                                           "milestone": "", "tags": []]
+        let staleTimed = LocalEntity(kind: .tummyTime, serverID: nil, childID: 1,
+                                     timestamp: Date(), payload: data(stalePayload), syncState: .pendingCreate)
+        context.insert(staleTimed)
+        let stale = PendingMutation(localID: staleTimed.localID, kind: .tummyTime, op: .create,
+                                    payload: data(stalePayload))
+        stale.fail(SyncEngine.staleTimerMessage, disposition: .blockedStaleTimer)
+        context.insert(stale)
+
         // A queued photo for the cached note (id 60) — pending work that used to be invisible here.
         if let note = LocalStore.fetch(kind: .note, serverID: 60, in: context) {
             context.insert(PendingImageUpload(localID: note.localID, kind: .note,

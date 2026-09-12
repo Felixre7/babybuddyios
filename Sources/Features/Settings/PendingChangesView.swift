@@ -20,6 +20,9 @@ struct PendingChangesView: View {
     /// The row awaiting discard confirmation. Discarding a queued create throws away the only
     /// copy of that activity, so it asks first.
     @State private var discarding: QueueTarget?
+    /// The stale-timer row awaiting "create without timer" confirmation. The original request may
+    /// have already succeeded, so it warns about a possible duplicate first.
+    @State private var creatingWithoutTimer: PendingMutation?
 
     var body: some View {
         NavigationStack {
@@ -32,7 +35,9 @@ struct PendingChangesView: View {
                                  lastError: mutation.lastError,
                                  isBlocked: mutation.isBlocked,
                                  createdAt: mutation.createdAt,
-                                 onRetry: { sync.retry(mutation) }),
+                                 onRetry: { sync.retry(mutation) },
+                                 onCreateWithoutTimer: mutation.isStaleTimer
+                                     ? { creatingWithoutTimer = mutation } : nil),
                         target: .mutation(mutation))
                 }
                 ForEach(uploads) { upload in
@@ -43,7 +48,8 @@ struct PendingChangesView: View {
                                  lastError: upload.lastError,
                                  isBlocked: upload.isBlocked,
                                  createdAt: upload.createdAt,
-                                 onRetry: { sync.retry(upload) }),
+                                 onRetry: { sync.retry(upload) },
+                                 onCreateWithoutTimer: nil),
                         target: .upload(upload))
                 }
             }
@@ -69,7 +75,24 @@ struct PendingChangesView: View {
             } message: { target in
                 Text(discardWarning(target))
             }
+            .alert("Create without the timer?", isPresented: createWithoutTimerPrompt,
+                   presenting: creatingWithoutTimer) { mutation in
+                Button("Create") { createWithoutTimer(mutation) }
+                Button("Cancel", role: .cancel) {}
+            } message: { mutation in
+                Text("If this \(mutation.kind.displayName.lowercased()) was already saved when the timer was stopped, you'll end up with two copies. Check the server first if you're unsure.")
+            }
         }
+    }
+
+    private var createWithoutTimerPrompt: Binding<Bool> {
+        Binding(get: { creatingWithoutTimer != nil }, set: { if !$0 { creatingWithoutTimer = nil } })
+    }
+
+    private func createWithoutTimer(_ mutation: PendingMutation) {
+        LocalRepository(context: context).createWithoutTimer(mutation)
+        creatingWithoutTimer = nil
+        Task { await sync.sync() }
     }
 
     @ViewBuilder
@@ -148,6 +171,8 @@ private struct QueueRow: View {
     let isBlocked: Bool
     let createdAt: Date
     let onRetry: () -> Void
+    /// Present only on a stale-timer create — the one blocked state with a second way out.
+    let onCreateWithoutTimer: (() -> Void)?
 
     var body: some View {
         BBCard(cornerRadius: BBRadius.row, padding: 13) {
@@ -168,19 +193,30 @@ private struct QueueRow: View {
                         .font(.caption2).foregroundStyle(.tertiary).lineLimit(1)
                 }
                 if isBlocked {
-                    Button(action: onRetry) {
-                        Label("Retry", systemImage: "arrow.clockwise")
-                            .font(.caption.weight(.semibold))
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 7)
-                            .background(BBColor.brandTint, in: RoundedRectangle(
-                                cornerRadius: BBRadius.control, style: .continuous))
-                            .foregroundStyle(BBColor.brandAccent)
+                    HStack(spacing: 8) {
+                        action("Retry", systemImage: "arrow.clockwise", onRetry)
+                        if let onCreateWithoutTimer {
+                            action("Create without timer", systemImage: "timer.slash", onCreateWithoutTimer)
+                        }
                     }
-                    .buttonStyle(.plain)
                 }
             }
         }
+    }
+
+    private func action(_ title: String, systemImage: String, _ perform: @escaping () -> Void) -> some View {
+        Button(action: perform) {
+            Label(title, systemImage: systemImage)
+                .font(.caption.weight(.semibold))
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 7)
+                .background(BBColor.brandTint, in: RoundedRectangle(
+                    cornerRadius: BBRadius.control, style: .continuous))
+                .foregroundStyle(BBColor.brandAccent)
+        }
+        .buttonStyle(.plain)
     }
 
     /// Blocked rows lead with the state, then the server's own words. A waiting row that has
