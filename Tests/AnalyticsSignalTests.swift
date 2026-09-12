@@ -124,6 +124,48 @@ final class AnalyticsSignalTests: XCTestCase {
         XCTAssertEqual(choices.map(\.rawValue), ["mine", "server", "merge"])
     }
 
+    // MARK: - Sync outcomes
+
+    /// `Sync.completed` says only that *something* moved, which a permanently parked queue row can
+    /// coexist with on every sync forever. `Sync.finished` adds the closed outcome plus the queue
+    /// census, so a drained sync is distinguishable from a partial one — counts of rows only,
+    /// never which records they were.
+    func testSyncFinishedCarriesTheOutcomeAndTheQueueCensus() {
+        Analytics.syncFinished(outcome: .partialBlocked, delivered: 2, uploaded: 1,
+                               blockedNew: 1, blockedTotal: 3, queued: 0)
+        XCTAssertEqual(recorder.parameters("Sync.finished"),
+                       ["outcome": "partialBlocked", "delivered": "2", "uploaded": "1",
+                        "blockedNew": "1", "blockedTotal": "3", "queued": "0"])
+    }
+
+    /// Each outcome is a dashboard series, so they must stay distinct, stably spelled, and carry
+    /// the same six keys — a key missing on one branch reads as absent data rather than as a bug.
+    func testEverySyncOutcomeIsDistinctAndCarriesTheSameKeys() {
+        let outcomes: [Analytics.SyncOutcome] =
+            [.drained, .partialBlocked, .transientFailure, .changedWithPendingWork]
+        XCTAssertEqual(outcomes.map(\.rawValue),
+                       ["drained", "partialBlocked", "transientFailure", "changedWithPendingWork"])
+        XCTAssertEqual(Set(outcomes.map(\.rawValue)).count, outcomes.count)
+
+        for outcome in outcomes {
+            let recorder = SignalRecorder()
+            defer { recorder.stop() }
+            Analytics.syncFinished(outcome: outcome, delivered: 0, uploaded: 0,
+                                   blockedNew: 0, blockedTotal: 0, queued: 0)
+            XCTAssertEqual(recorder.parameters("Sync.finished"),
+                           ["outcome": outcome.rawValue, "delivered": "0", "uploaded": "0",
+                            "blockedNew": "0", "blockedTotal": "0", "queued": "0"])
+        }
+    }
+
+    /// The existing Sync & Reliability dashboard counts this one. `Sync.finished` is additive:
+    /// `Sync.completed` keeps firing on exactly the same syncs, still carrying nothing.
+    func testSyncCompletedStaysParameterless() {
+        Analytics.syncCompleted()
+        XCTAssertEqual(recorder.names, ["Sync.completed"])
+        XCTAssertEqual(recorder.parameters("Sync.completed"), [:])
+    }
+
     /// A name and a boolean, and nothing else — never the value the setting governs.
     func testSettingChangedCarriesOnlyTheNameAndTheBool() {
         Analytics.settingChanged("appLock", enabled: true)

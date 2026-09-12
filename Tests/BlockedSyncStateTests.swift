@@ -597,4 +597,122 @@ final class BlockedSyncStateTests: XCTestCase {
         XCTAssertFalse(try XCTUnwrap(rows.first { $0.localID != blockedID }).isBlocked,
                        "a row that was never failed is waiting, not blocked")
     }
+
+    // MARK: Sync outcome telemetry (Work Package 6)
+
+    #if DEBUG
+    /// One `Sync.finished`, and its parameters — a sync emits exactly one outcome or none at all.
+    private func outcome(of recorder: SignalRecorder) -> [String: String]? {
+        XCTAssertLessThanOrEqual(recorder.names.filter { $0 == "Sync.finished" }.count, 1,
+                                 "one outcome per sync run")
+        return recorder.parameters("Sync.finished")
+    }
+
+    /// The queue emptied: the outcome `Sync.completed` alone can't distinguish from a sync that
+    /// delivered one record and parked another.
+    func testDrainedSyncReportsDrainedAlongsideSyncCompleted() async {
+        let recorder = SignalRecorder()
+        defer { recorder.stop() }
+        queueCreate()
+        StubTransport.reset([.init(status: 201, body: #"{"id":42,"child":1,"start":"2024-01-15T10:00:00-05:00"}"#)])
+
+        await engine.sync()
+
+        XCTAssertEqual(outcome(of: recorder),
+                       ["outcome": "drained", "delivered": "1", "uploaded": "0",
+                        "blockedNew": "0", "blockedTotal": "0", "queued": "0"])
+        XCTAssertTrue(recorder.names.contains("Sync.completed"), "the existing signal is unchanged")
+    }
+
+    /// The pattern the investigation found: a rejection parks a row, the sync reports itself as
+    /// completed, and nothing said the queue never emptied. `blockedNew` is the transition.
+    func testBlockedRowMakesTheSyncPartialBlocked() async {
+        let recorder = SignalRecorder()
+        defer { recorder.stop() }
+        queueCreate()
+        StubTransport.reset([.init(status: 400, body: #"{"amount":["Required."]}"#)])
+
+        await engine.sync()
+
+        XCTAssertEqual(outcome(of: recorder),
+                       ["outcome": "partialBlocked", "delivered": "0", "uploaded": "0",
+                        "blockedNew": "1", "blockedTotal": "1", "queued": "0"])
+        XCTAssertFalse(recorder.names.contains("Sync.completed"), "nothing moved")
+    }
+
+    /// A 5xx says nothing about the payload: the row stays eligible, and the outcome says the
+    /// queue stopped rather than that it drained.
+    func testRetryableFailureReportsTransientFailure() async {
+        let recorder = SignalRecorder()
+        defer { recorder.stop() }
+        queueCreate()
+        StubTransport.reset([.init(status: 503, body: "{}")])
+
+        await engine.sync()
+
+        XCTAssertEqual(outcome(of: recorder),
+                       ["outcome": "transientFailure", "delivered": "0", "uploaded": "0",
+                        "blockedNew": "0", "blockedTotal": "0", "queued": "1"])
+    }
+
+    /// Work delivered, work still waiting, nothing wrong: an image whose record isn't on the
+    /// server yet is skipped until it is, which is neither drained nor blocked.
+    func testDeliveredWithWaitingUploadReportsPendingWork() async {
+        let recorder = SignalRecorder()
+        defer { recorder.stop() }
+        queueCreate()
+        // A second record that never got as far as the queue — its photo has nothing to attach to.
+        let unsynced = LocalEntity(kind: .note, serverID: nil, childID: 1, timestamp: .now,
+                                   payload: data(["child": 1, "time": iso, "note": "hi"]),
+                                   syncState: .pendingCreate)
+        context.insert(unsynced)
+        repo.enqueueImageUpload(for: unsynced, imageData: Data("jpegbytes".utf8))
+        let waiting = uploads()[0]
+        defer { ImageUploadStore.delete(waiting.filename) }
+        StubTransport.reset([.init(status: 201, body: #"{"id":42,"child":1,"start":"2024-01-15T10:00:00-05:00"}"#)])
+
+        await engine.sync()
+
+        XCTAssertEqual(StubTransport.requests.count, 1, "the upload was never attempted")
+        XCTAssertEqual(outcome(of: recorder),
+                       ["outcome": "changedWithPendingWork", "delivered": "1", "uploaded": "0",
+                        "blockedNew": "0", "blockedTotal": "0", "queued": "1"])
+    }
+
+    /// The noise suppression `Sync.completed` has: most syncs are foreground/pull-to-refresh/
+    /// post-timer no-ops with an empty queue, and reporting those would swamp the signal.
+    func testNoOpSyncReportsNothing() async {
+        let recorder = SignalRecorder()
+        defer { recorder.stop() }
+
+        await engine.sync()
+
+        XCTAssertEqual(recorder.names, [], "an empty queue and an unchanged pull say nothing")
+    }
+
+    /// A row already parked when the sync starts — the shape an upgrade from build 1.0.2 inherits,
+    /// and the one that produced hundreds of identical events. Walking past it must send nothing
+    /// and report nothing new: no request, no rejection, and `blockedNew` zero. The standing
+    /// backlog stays visible in `blockedTotal`, which is what makes the sync knowably partial.
+    func testAlreadyBlockedRowIsSkippedWithoutReportingARejection() async {
+        let recorder = SignalRecorder()
+        defer { recorder.stop() }
+        let mutation = queueCreate()
+        mutation.fail("rejected on an earlier launch", blocked: true)
+        try? context.save()
+        StubTransport.reset([.init(status: 400, body: #"{"amount":["Required."]}"#)])
+
+        for _ in 0..<5 { await engine.sync() }
+
+        XCTAssertEqual(StubTransport.requests.count, 0, "a parked row is never re-sent")
+        XCTAssertEqual(recorder.names.filter { $0 == "Error.serverRejected" }.count, 0,
+                       "skipping a row that was already blocked reports no rejection")
+        XCTAssertEqual(mutation.attemptCount, 1, "and its attempt count stops climbing")
+        XCTAssertEqual(recorder.parameters("Sync.finished"),
+                       ["outcome": "partialBlocked", "delivered": "0", "uploaded": "0",
+                        "blockedNew": "0", "blockedTotal": "1", "queued": "0"])
+        XCTAssertEqual(recorder.names.filter { $0 == "Sync.finished" }.count, 5,
+                       "the backlog is reported per sync; the rejection is not")
+    }
+    #endif
 }

@@ -51,6 +51,13 @@ designed to be **anonymous and non-attributed**:
     A failed sign-in is reported the same way, as a category only — never the address or token
     you typed. Neither the local nor the server version of a conflicted record is ever included,
     and error reports never include the server's message text or any field's value.
+    A sync that did work, or found work still waiting, additionally reports how it ended — one of
+    four fixed words: everything sent, some items parked, stopped on a temporary problem, or more
+    still queued — together with plain counts: how many records were sent, how many photos were
+    uploaded, how many items this sync parked, how many are parked in total, and how many are
+    still waiting to be sent. Those are counts of queued items and nothing else: never which
+    records they are, what they contain, or when they happened. A sync that did nothing reports
+    nothing at all.
   - **Server capabilities** — when your server doesn't have an endpoint this app looks for (older
     Baby Buddy releases lack some), its name — e.g. "pumping" — is reported once per app launch.
     This is how we tell which server versions to keep supporting. Nothing about the server itself
