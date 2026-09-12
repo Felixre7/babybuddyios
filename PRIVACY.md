@@ -1,6 +1,6 @@
 # Privacy Policy — Baby Buddy for iOS
 
-_Last updated: 2026-09-07_
+_Last updated: 2026-09-12_
 
 Baby Buddy for iOS is a client for a **self-hosted Baby Buddy server that you provide**. The app has
 no first-party backend operated by the developer.
