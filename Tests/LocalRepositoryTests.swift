@@ -103,6 +103,23 @@ final class LocalRepositoryTests: XCTestCase {
         XCTAssertEqual(original.serverID, 42)
     }
 
+    /// A record saved with identical start and end (the editor's default) used to fall through to
+    /// the start-only restamp, leaving the original end behind and producing start > end — a record
+    /// the server rejects on every sync. Zero duration must restamp both.
+    func testRepeatEventRestampsBothWhenStartEqualsEnd() throws {
+        let entity = repo.create(kind: .feeding, payload: [
+            "child": 1, "start": "2024-01-15T10:00:00-05:00", "end": "2024-01-15T10:00:00-05:00",
+            "type": "formula", "method": "bottle"])!
+        let now = Date()
+        let copy = repo.repeatEvent(entity, now: now)!
+
+        let p = copy.payloadObject
+        let start = APIDate.parse(p["start"] as! String)!
+        let end = APIDate.parse(p["end"] as! String)!
+        XCTAssertEqual(start.timeIntervalSince(now), 0, accuracy: 1)
+        XCTAssertEqual(end.timeIntervalSince(now), 0, accuracy: 1)
+    }
+
     func testRepeatEventRestampsTimeStampedRecord() throws {
         let entity = repo.create(kind: .note, payload: [
             "child": 1, "time": "2024-01-15T10:00:00-05:00", "note": "hello"])!
