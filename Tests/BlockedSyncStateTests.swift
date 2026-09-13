@@ -726,6 +726,13 @@ final class BlockedSyncStateTests: XCTestCase {
                        "Amount: This field is required.\nAnother entry intersects the specified time period.")
     }
 
+    func testHTMLInServerMessageIsStripped() throws {
+        let body = try JSONSerialization.data(withJSONObject: [
+            "non_field_errors": ["Conflicting entry: <a href=\"/feedings/470/\">Feeding (1:09 a.m. - 1:24 a.m.)</a>"]])
+        XCTAssertEqual(APIClient.errorMessage(from: body),
+                       "Conflicting entry: Feeding (1:09 a.m. - 1:24 a.m.)")
+    }
+
     func testEmptyObjectYieldsNoMessage() throws {
         XCTAssertNil(APIClient.errorMessage(from: Data("{}".utf8)))
     }

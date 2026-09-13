@@ -315,9 +315,11 @@ final class APIClient {
             case let one?: text = "\(one)"
             case nil: return nil
             }
-            if key == "non_field_errors" || key == "detail" { return text }
+            // Baby Buddy's overlap message embeds a link to the other entry as raw HTML.
+            let plain = text.replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
+            if key == "non_field_errors" || key == "detail" { return plain }
             let label = key.replacingOccurrences(of: "_", with: " ").capitalized
-            return "\(label): \(text)"
+            return "\(label): \(plain)"
         }
         return lines.isEmpty ? nil : lines.joined(separator: "\n")
     }
