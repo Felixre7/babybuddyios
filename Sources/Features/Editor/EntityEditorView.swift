@@ -67,6 +67,9 @@ struct EntityEditorView: View {
     @State private var dosageUnit = "mg"
 
     @State private var confirmingDelete = false
+    /// The queued write for this record that the server refused, if any. Drives the sync banner.
+    @State private var blockedMutation: PendingMutation?
+    @State private var showingPending = false
 
     private var isEditing: Bool { entity != nil }
     private var isConverting: Bool { sourceTimer != nil }
@@ -107,7 +110,56 @@ struct EntityEditorView: View {
                 Button("Delete", role: .destructive, action: delete)
             }
             .onAppear(perform: populate)
+            .onAppear(perform: loadBlockedMutation)
+            .sheet(isPresented: $showingPending) {
+                PendingChangesView(highlight: blockedMutation?.localID)
+            }
         }
+    }
+
+    /// Why this record is stuck in the sync queue, when it is. Tapping it opens Pending Changes
+    /// on that row, where Retry, Discard, and (for a stale timer) Create without timer live.
+    @ViewBuilder private var syncErrorBanner: some View {
+        if let blockedMutation, let message = blockedMutation.lastError {
+            Button { showingPending = true } label: {
+                HStack(alignment: .top, spacing: 10) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 15))
+                        .foregroundStyle(BBColor.danger)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Couldn\u{2019}t sync")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(BBColor.danger)
+                        Text(message)
+                            .font(.footnote)
+                            .foregroundStyle(.primary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Text(blockedMutation.isStaleTimer
+                             ? "Retry, discard, or create without the timer in Pending Changes"
+                             : "Fix it here and save, or retry or discard in Pending Changes")
+                            .font(.caption)
+                            .foregroundStyle(BBColor.danger)
+                    }
+                    Spacer(minLength: 0)
+                    Image(systemName: "chevron.right")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(BBColor.danger)
+                }
+                .multilineTextAlignment(.leading)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 11)
+                .background(BBColor.danger.opacity(scheme == .dark ? 0.16 : 0.10),
+                            in: RoundedRectangle(cornerRadius: BBRadius.control, style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Couldn\u{2019}t sync. \(message). Opens Pending Changes.")
+        }
+    }
+
+    private func loadBlockedMutation() {
+        guard let localID = entity?.localID else { return }
+        let all = (try? context.fetch(FetchDescriptor<PendingMutation>())) ?? []
+        blockedMutation = all.first { $0.localID == localID && $0.isBlocked }
     }
 
     /// The editor's scrolling content: the activity selector (while creating, so the customer can
@@ -119,6 +171,7 @@ struct EntityEditorView: View {
 
     /// The editable form (everything below the activity selector).
     @ViewBuilder private var formSections: some View {
+        syncErrorBanner
         sectioned("When") { whenCard }
         sectioned(detailsTitle) { detailsCard }
         sectioned("Tags") { tagsCard }

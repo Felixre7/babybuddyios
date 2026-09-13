@@ -3,6 +3,8 @@ import SwiftUI
 /// Small badge indicating a record's sync state. Hidden when fully synced.
 struct SyncStateBadge: View {
     let state: SyncState
+    /// The server refused this record's queued write; it sits parked in Pending Changes.
+    var blocked: Bool = false
 
     var body: some View {
         switch state {
@@ -11,10 +13,14 @@ struct SyncStateBadge: View {
         case .pendingCreate, .pendingUpdate, .pendingDelete:
             // Darker-than-system orange clears the 3:1 non-text contrast bar; the distinct symbol
             // (vs. the conflict triangle) means state isn't conveyed by color alone.
-            Image(systemName: "arrow.triangle.2.circlepath")
-                .foregroundStyle(BBColor.restart)
-                .help("Waiting to sync")
-                .accessibilityLabel("Waiting to sync")
+            HStack(spacing: 3) {
+                if blocked {
+                    Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(BBColor.danger)
+                }
+                Image(systemName: "arrow.triangle.2.circlepath").foregroundStyle(BBColor.restart)
+            }
+            .help(blocked ? "Sync needs attention" : "Waiting to sync")
+            .accessibilityLabel(blocked ? "Sync needs attention" : "Waiting to sync")
         case .conflicted:
             Image(systemName: "exclamationmark.triangle.fill")
                 .foregroundStyle(BBColor.danger)

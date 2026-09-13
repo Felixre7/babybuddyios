@@ -301,12 +301,25 @@ final class APIClient {
         return dict.keys.sorted()
     }
 
-    private static func errorMessage(from data: Data) -> String? {
+    /// A DRF validation body as sentences a person can read in Pending Changes. Each field's
+    /// messages are joined into one line; `non_field_errors` is unlabeled (the message speaks for
+    /// the whole record), other keys become a plain label ("Amount: This field is required.").
+    static func errorMessage(from data: Data) -> String? {
         guard let obj = try? JSONSerialization.jsonObject(with: data) else { return nil }
-        if let dict = obj as? [String: Any] {
-            return dict.map { "\($0.key): \($0.value)" }.joined(separator: "\n")
+        guard let dict = obj as? [String: Any] else { return String(data: data, encoding: .utf8) }
+        let lines: [String] = dict.keys.sorted().compactMap { key in
+            let value = dict[key]
+            let text: String
+            switch value {
+            case let list as [Any]: text = list.map { "\($0)" }.joined(separator: " ")
+            case let one?: text = "\(one)"
+            case nil: return nil
+            }
+            if key == "non_field_errors" || key == "detail" { return text }
+            let label = key.replacingOccurrences(of: "_", with: " ").capitalized
+            return "\(label): \(text)"
         }
-        return String(data: data, encoding: .utf8)
+        return lines.isEmpty ? nil : lines.joined(separator: "\n")
     }
 }
 

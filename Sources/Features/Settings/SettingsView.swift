@@ -187,6 +187,9 @@ struct SettingsView: View {
                 if ProcessInfo.processInfo.environment["BB_OPEN_CONFLICT"] == "1" {
                     debugConflict = conflicts.first
                 }
+                if ProcessInfo.processInfo.environment["BB_OPEN_PENDING"] == "1" {
+                    showingPending = true
+                }
                 if ProcessInfo.processInfo.environment["BB_ICONS"] == "1" {
                     debugIcons = true
                 }
