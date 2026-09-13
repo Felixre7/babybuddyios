@@ -15,6 +15,10 @@ struct TimelineView: View {
     @Query(filter: #Predicate<LocalEntity> { $0.kindRaw == "child" }, sort: \.timestamp)
     private var children: [LocalEntity]
     @Query private var cachedTags: [CachedTag]
+    /// Rows whose queued write the server refused, so the timeline can flag them.
+    @Query(filter: #Predicate<PendingMutation> { $0.dispositionRaw != nil })
+    private var blockedMutations: [PendingMutation]
+    private var blockedIDs: Set<UUID> { Set(blockedMutations.map(\.localID)) }
     @State private var kindFilter: EntityKind?
     @State private var editing: LocalEntity?
     @State private var didAutoLoadHistory = false
@@ -60,7 +64,8 @@ struct TimelineView: View {
                             .listRowSeparator(.hidden)
                             .listRowBackground(Color.clear)
                     case .event(let entity, let connectsDown):
-                        TimelineRailRow(entity: entity, connectsDown: connectsDown, tagColors: tagColors)
+                        TimelineRailRow(entity: entity, connectsDown: connectsDown, tagColors: tagColors,
+                                        blocked: blockedIDs.contains(entity.localID))
                             .listRowInsets(EdgeInsets())
                             .listRowSeparator(.hidden)
                             .listRowBackground(Color.clear)
@@ -361,6 +366,7 @@ struct TimelineRailRow: View {
     let entity: LocalEntity
     let connectsDown: Bool
     let tagColors: [String: String]
+    var blocked: Bool = false
 
     var body: some View {
         HStack(alignment: .top, spacing: 9) {
@@ -424,7 +430,7 @@ struct TimelineRailRow: View {
                 VStack(alignment: .trailing, spacing: 2) {
                     Text(entity.timestamp.formatted(date: .omitted, time: .shortened))
                         .font(.subheadline.weight(.semibold)).monospacedDigit()
-                    SyncStateBadge(state: entity.syncState).font(.caption2)
+                    SyncStateBadge(state: entity.syncState, blocked: blocked).font(.caption2)
                 }
             }
         }

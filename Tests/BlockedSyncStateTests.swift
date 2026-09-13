@@ -384,8 +384,8 @@ final class BlockedSyncStateTests: XCTestCase {
         await engine.pushPending()
         XCTAssertTrue(create.isBlocked)
         XCTAssertFalse(create.isStaleTimer)
-        XCTAssertTrue(create.lastError?.contains("amount") == true)
-        XCTAssertTrue(create.lastError?.contains("timer") == true)
+        XCTAssertTrue(create.lastError?.localizedCaseInsensitiveContains("amount") == true)
+        XCTAssertTrue(create.lastError?.localizedCaseInsensitiveContains("timer") == true)
 
         for _ in 0..<3 { await engine.pushPending() }
         XCTAssertEqual(StubTransport.requests.count, 1)
@@ -715,4 +715,18 @@ final class BlockedSyncStateTests: XCTestCase {
                        "the backlog is reported per sync; the rejection is not")
     }
     #endif
+
+    // MARK: Readable server messages
+
+    func testValidationBodyBecomesReadableSentences() throws {
+        let body = try JSONSerialization.data(withJSONObject: [
+            "non_field_errors": ["Another entry intersects the specified time period."],
+            "amount": ["This field is required."]])
+        XCTAssertEqual(APIClient.errorMessage(from: body),
+                       "Amount: This field is required.\nAnother entry intersects the specified time period.")
+    }
+
+    func testEmptyObjectYieldsNoMessage() throws {
+        XCTAssertNil(APIClient.errorMessage(from: Data("{}".utf8)))
+    }
 }

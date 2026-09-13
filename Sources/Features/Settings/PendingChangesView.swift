@@ -23,9 +23,12 @@ struct PendingChangesView: View {
     /// The stale-timer row awaiting "create without timer" confirmation. The original request may
     /// have already succeeded, so it warns about a possible duplicate first.
     @State private var creatingWithoutTimer: PendingMutation?
+    /// The row to scroll to and outline on appear — the editor's sync banner lands here.
+    var highlight: UUID? = nil
 
     var body: some View {
         NavigationStack {
+            ScrollViewReader { proxy in
             List {
                 ForEach(mutations) { mutation in
                     let entity = LocalStore.fetch(localID: mutation.localID, in: context)
@@ -37,8 +40,10 @@ struct PendingChangesView: View {
                                  createdAt: mutation.createdAt,
                                  onRetry: { sync.retry(mutation) },
                                  onCreateWithoutTimer: mutation.isStaleTimer
-                                     ? { creatingWithoutTimer = mutation } : nil),
+                                     ? { creatingWithoutTimer = mutation } : nil,
+                                 highlighted: mutation.localID == highlight),
                         target: .mutation(mutation))
+                    .id(mutation.localID)
                 }
                 ForEach(uploads) { upload in
                     let entity = LocalStore.fetch(localID: upload.localID, in: context)
@@ -49,9 +54,12 @@ struct PendingChangesView: View {
                                  isBlocked: upload.isBlocked,
                                  createdAt: upload.createdAt,
                                  onRetry: { sync.retry(upload) },
-                                 onCreateWithoutTimer: nil),
+                                 onCreateWithoutTimer: nil,
+                                 highlighted: false),
                         target: .upload(upload))
                 }
+            }
+            .onAppear { if let highlight { proxy.scrollTo(highlight, anchor: .center) } }
             }
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
@@ -173,6 +181,8 @@ private struct QueueRow: View {
     let onRetry: () -> Void
     /// Present only on a stale-timer create — the one blocked state with a second way out.
     let onCreateWithoutTimer: (() -> Void)?
+    /// Outlined so the eye lands on it when arriving from the editor's sync banner.
+    var highlighted: Bool = false
 
     var body: some View {
         BBCard(cornerRadius: BBRadius.row, padding: 13) {
@@ -202,6 +212,12 @@ private struct QueueRow: View {
                 }
             }
         }
+        .overlay {
+            if highlighted {
+                RoundedRectangle(cornerRadius: BBRadius.row, style: .continuous)
+                    .strokeBorder(BBColor.danger, lineWidth: 2)
+            }
+        }
     }
 
     private func action(_ title: String, systemImage: String, _ perform: @escaping () -> Void) -> some View {
@@ -229,9 +245,9 @@ private struct QueueRow: View {
         }
         if let lastError, !lastError.isEmpty {
             Text(lastError)
-                .font(.caption2)
-                .foregroundStyle(isBlocked ? BBColor.danger : .secondary)
-                .lineLimit(3)
+                .font(.caption)
+                .foregroundStyle(isBlocked ? .primary : .secondary)
+                .fixedSize(horizontal: false, vertical: true)
         } else if !isBlocked {
             Text("Waiting to sync")
                 .font(.caption2)

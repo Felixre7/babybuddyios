@@ -17,6 +17,8 @@ struct DayTimelineView: View {
     /// store-side so the view never materializes the whole table.
     @Query private var events: [LocalEntity]
     @Query private var cachedTags: [CachedTag]
+    @Query(filter: #Predicate<PendingMutation> { $0.dispositionRaw != nil })
+    private var blockedMutations: [PendingMutation]
     @State private var editing: LocalEntity?
     @State private var adding = false
 
@@ -48,7 +50,8 @@ struct DayTimelineView: View {
             ForEach(Array(events.enumerated()), id: \.element.localID) { index, entity in
                 TimelineRailRow(entity: entity,
                                 connectsDown: index < events.count - 1,
-                                tagColors: tagColors)
+                                tagColors: tagColors,
+                                blocked: blockedMutations.contains { $0.localID == entity.localID })
                     .listRowInsets(EdgeInsets())
                     .listRowSeparator(.hidden)
                     .listRowBackground(Color.clear)

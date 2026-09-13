@@ -116,7 +116,7 @@ enum DemoData {
         context.insert(rejected)
         let blocked = PendingMutation(localID: rejected.localID, kind: .feeding, op: .create,
                                       payload: data(rejectedPayload))
-        blocked.fail("amount: [\"This field is required.\"]", blocked: true)
+        blocked.fail("Another entry intersects the specified time period. Conflicting entry: 09/12/2026 4:02 p.m. to 09/12/2026 4:17 p.m.", blocked: true)
         context.insert(blocked)
 
         // A timer conversion whose server timer is gone: Retry and "Create without timer".
