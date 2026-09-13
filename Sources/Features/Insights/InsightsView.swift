@@ -22,7 +22,7 @@ struct InsightsView: View {
     init(selectedChildID: Binding<Int>) {
         _selectedChildID = selectedChildID
         let child = selectedChildID.wrappedValue
-        let kinds = [EntityKind.sleep, .feeding, .change].map(\.rawValue)
+        let kinds = [EntityKind.sleep, .feeding, .change, .tummyTime, .pumping].map(\.rawValue)
         let pendingDelete = SyncState.pendingDelete.rawValue
         let predicate = #Predicate<LocalEntity> { entity in
             entity.childID == child && kinds.contains(entity.kindRaw)
@@ -43,6 +43,8 @@ struct InsightsView: View {
                     sleepCard
                     feedingCard
                     diaperCard
+                    tummyTimeCard
+                    pumpingCard
                 }
                 .padding(.horizontal)
                 .padding(.top, 8)
@@ -182,6 +184,79 @@ struct InsightsView: View {
                 .frame(height: chartHeight)
             } else {
                 emptyChart("No diaper changes logged")
+            }
+        }
+    }
+
+    // MARK: Tummy time
+
+    private var tummyTimeCard: some View {
+        let series = aggregator.tummyTimeMinutesByDay(chartEntities, childID: selectedChildID, period: period)
+        let total = series.reduce(0) { $0 + $1.minutes }
+        let hasData = total > 0
+        return ChartCard(title: "Tummy Time", icon: .tummyTime,
+                         summary: hasData ? "Avg \(Int(total / Double(series.count))) min / day" : nil) {
+            if hasData {
+                Chart(series) { day in
+                    BarMark(
+                        x: .value("Day", day.day, unit: .day),
+                        y: .value("Minutes", day.minutes))
+                    .foregroundStyle(BBColor.tummy)
+                    .cornerRadius(3)
+                    .accessibilityLabel(dayLabel(day.day))
+                    .accessibilityValue("\(Int(day.minutes)) minutes")
+                }
+                .chartYAxisLabel("Minutes")
+                .modifier(DayAxis(period: period))
+                .frame(height: chartHeight)
+            } else {
+                emptyChart("No tummy time logged")
+            }
+        }
+    }
+
+    // MARK: Pumping
+
+    private var pumpingCard: some View {
+        let series = aggregator.pumpingByDay(chartEntities, childID: selectedChildID, period: period)
+        let totalCount = series.reduce(0) { $0 + $1.count }
+        let totalAmount = series.reduce(0) { $0 + $1.totalAmount }
+        let hasData = totalCount > 0
+        return ChartCard(title: "Pumping", icon: .pumping,
+                         summary: hasData ? "Avg \(Int(totalAmount / Double(series.count))) ml / day" : nil) {
+            if hasData {
+                VStack(alignment: .leading, spacing: 14) {
+                    Chart(series) { day in
+                        BarMark(
+                            x: .value("Day", day.day, unit: .day),
+                            y: .value("Amount", day.totalAmount))
+                        .foregroundStyle(BBColor.pumping)
+                        .cornerRadius(3)
+                        .accessibilityLabel(dayLabel(day.day))
+                        .accessibilityValue("\(Int(day.totalAmount)) millilitres")
+                    }
+                    .chartYAxisLabel("ml")
+                    .modifier(DayAxis(period: period))
+                    .frame(height: chartHeight)
+
+                    Divider().overlay(BBColor.divider)
+                    Text("Sessions")
+                        .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                    Chart(series) { day in
+                        BarMark(
+                            x: .value("Day", day.day, unit: .day),
+                            y: .value("Sessions", day.count))
+                        .foregroundStyle(BBColor.pumping.opacity(0.55))
+                        .cornerRadius(3)
+                        .accessibilityLabel(dayLabel(day.day))
+                        .accessibilityValue("\(day.count) sessions")
+                    }
+                    .chartYAxis { AxisMarks(values: .automatic(desiredCount: 4)) }
+                    .modifier(DayAxis(period: period))
+                    .frame(height: chartHeight * 0.8)
+                }
+            } else {
+                emptyChart("No pumping logged")
             }
         }
     }

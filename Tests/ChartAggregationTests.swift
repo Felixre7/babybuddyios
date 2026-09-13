@@ -108,6 +108,34 @@ final class ChartAggregationTests: XCTestCase {
         XCTAssertEqual(day?.total, 4)
     }
 
+    // MARK: Tummy time
+
+    func testTummyTimeMinutesSummedPerDay() {
+        add(.tummyTime, ["start": "2026-06-14T10:00:00Z", "end": "2026-06-14T10:05:00Z"]) // 5 min
+        add(.tummyTime, ["start": "2026-06-14T16:00:00Z", "end": "2026-06-14T16:07:30Z"]) // 7.5 min
+        add(.tummyTime, ["start": "2026-06-14T18:00:00Z"])                                // no end
+
+        let series = aggregator.tummyTimeMinutesByDay(all(), childID: 1, period: .week, now: now)
+        XCTAssertEqual(series.count, 7)
+        let day = series.first { iso($0.day) == "2026-06-14T00:00:00Z" }
+        XCTAssertEqual(day?.minutes ?? -1, 12.5, accuracy: 0.001)
+        XCTAssertEqual(series.reduce(0) { $0 + $1.minutes }, 12.5, accuracy: 0.001)
+    }
+
+    // MARK: Pumping
+
+    func testPumpingCountAndAmountPerDay() {
+        add(.pumping, ["start": "2026-06-15T08:00:00Z", "end": "2026-06-15T08:20:00Z", "amount": 120])
+        add(.pumping, ["start": "2026-06-15T14:00:00Z", "end": "2026-06-15T14:15:00Z", "amount": 90.5])
+        add(.feeding, ["start": "2026-06-15T09:00:00Z", "end": "2026-06-15T09:10:00Z", "amount": 100]) // not pumping
+
+        let series = aggregator.pumpingByDay(all(), childID: 1, period: .week, now: now)
+        let today = bucket(series, "2026-06-15T00:00:00Z")
+        XCTAssertEqual(today?.count, 2)
+        XCTAssertEqual(today?.totalAmount ?? -1, 210.5, accuracy: 0.001)
+        XCTAssertEqual(series.reduce(0) { $0 + $1.count }, 2)
+    }
+
     // MARK: Scoping & empty
 
     func testExcludesOtherChildrenAndDeleted() {
@@ -133,7 +161,7 @@ final class ChartAggregationTests: XCTestCase {
     private func hours(_ series: [DailySleep], _ dayISO: String) -> Double {
         series.first { iso($0.day) == dayISO }?.hours ?? -1
     }
-    private func bucket(_ series: [DailyFeeding], _ dayISO: String) -> DailyFeeding? {
+    private func bucket(_ series: [DailyTally], _ dayISO: String) -> DailyTally? {
         series.first { iso($0.day) == dayISO }
     }
 }

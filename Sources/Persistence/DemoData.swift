@@ -176,7 +176,7 @@ enum DemoData {
         try? context.save()
     }
 
-    /// Seed ~30 days of deterministic feedings, diaper changes, and sleep so the Trends charts
+    /// Seed ~30 days of deterministic feedings, diaper changes, sleep, tummy time, and pumping so the Trends charts
     /// (and Timeline history) have something to plot in demo mode. Values are derived
     /// arithmetically from the day offset so screenshots stay stable across runs. ids are
     /// namespaced (2000+) so they never collide with the recent seeds or the load-older batch.
@@ -234,6 +234,27 @@ enum DemoData {
                 insert(.sleep, id: nextID, [
                     "id": nextID, "child": 1, "start": iso(daysAgo, start), "end": iso(daysAgo, end),
                     "nap": start > 6, "tags": [],
+                ], context); nextID += 1
+            }
+
+            // Tummy time: 2–3 short sessions (3–8 min) — every fourth day skipped.
+            if daysAgo % 4 != 0 {
+                for t in 0..<(2 + daysAgo % 2) {
+                    let minutes = Double(3 + (daysAgo * 3 + t * 5) % 6)
+                    let hour = 11.0 + Double(t) * 3.0
+                    insert(.tummyTime, id: nextID, [
+                        "id": nextID, "child": 1, "start": iso(daysAgo, hour),
+                        "end": iso(daysAgo, hour + minutes / 60), "milestone": "", "tags": [],
+                    ], context); nextID += 1
+                }
+            }
+
+            // Pumping: 3–4 sessions of 60–140 ml.
+            for s in 0..<(3 + daysAgo % 2) {
+                let hour = 7.0 + Double(s) * 4.5
+                insert(.pumping, id: nextID, [
+                    "id": nextID, "child": 1, "start": iso(daysAgo, hour - 0.33), "end": iso(daysAgo, hour),
+                    "amount": Double(60 + ((daysAgo * 11 + s * 23) % 80)), "tags": [],
                 ], context); nextID += 1
             }
         }

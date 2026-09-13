@@ -22,11 +22,18 @@ struct DailySleep: Identifiable, Equatable {
     var id: Date { day }
 }
 
-/// One day's feeding tally: how many feedings and the total recorded amount (ml).
-struct DailyFeeding: Identifiable, Equatable {
+/// One day's total tummy time, in minutes.
+struct DailyTummyTime: Identifiable, Equatable {
+    let day: Date
+    let minutes: Double
+    var id: Date { day }
+}
+
+/// One day's feeding or pumping tally: how many sessions and the total recorded amount (ml).
+struct DailyTally: Identifiable, Equatable {
     let day: Date
     let count: Int
-    /// Sum of the `amount` field across the day's feedings; 0 when none carried an amount.
+    /// Sum of the `amount` field across the day's records; 0 when none carried an amount.
     let totalAmount: Double
     var id: Date { day }
 }
@@ -62,22 +69,38 @@ struct ChartAggregator {
     /// Total logged sleep per day, in hours, from start/end intervals.
     func sleepHoursByDay(_ entities: [LocalEntity], childID: Int,
                          period: ChartPeriod, now: Date = .now) -> [DailySleep] {
-        var seconds = [Date: Double]()
-        for entity in matching(entities, kind: .sleep, childID: childID) {
-            guard let interval = durationSeconds(entity) else { continue }
-            seconds[calendar.startOfDay(for: entity.timestamp), default: 0] += interval
-        }
+        let seconds = durationSecondsByDay(entities, kind: .sleep, childID: childID)
         return days(for: period, now: now).map {
             DailySleep(day: $0, hours: (seconds[$0] ?? 0) / 3600)
         }
     }
 
+    /// Total logged tummy time per day, in minutes, from start/end intervals.
+    func tummyTimeMinutesByDay(_ entities: [LocalEntity], childID: Int,
+                               period: ChartPeriod, now: Date = .now) -> [DailyTummyTime] {
+        let seconds = durationSecondsByDay(entities, kind: .tummyTime, childID: childID)
+        return days(for: period, now: now).map {
+            DailyTummyTime(day: $0, minutes: (seconds[$0] ?? 0) / 60)
+        }
+    }
+
     /// Feeding count and total amount (ml) per day.
     func feedingsByDay(_ entities: [LocalEntity], childID: Int,
-                       period: ChartPeriod, now: Date = .now) -> [DailyFeeding] {
+                       period: ChartPeriod, now: Date = .now) -> [DailyTally] {
+        tally(entities, kind: .feeding, childID: childID, period: period, now: now)
+    }
+
+    /// Pumping session count and total amount (ml) per day.
+    func pumpingByDay(_ entities: [LocalEntity], childID: Int,
+                      period: ChartPeriod, now: Date = .now) -> [DailyTally] {
+        tally(entities, kind: .pumping, childID: childID, period: period, now: now)
+    }
+
+    private func tally(_ entities: [LocalEntity], kind: EntityKind, childID: Int,
+                       period: ChartPeriod, now: Date) -> [DailyTally] {
         var counts = [Date: Int]()
         var amounts = [Date: Double]()
-        for entity in matching(entities, kind: .feeding, childID: childID) {
+        for entity in matching(entities, kind: kind, childID: childID) {
             let day = calendar.startOfDay(for: entity.timestamp)
             counts[day, default: 0] += 1
             // JSON numbers decode as NSNumber, so a stored int or double both bridge to Double;
@@ -87,7 +110,7 @@ struct ChartAggregator {
             }
         }
         return days(for: period, now: now).map {
-            DailyFeeding(day: $0, count: counts[$0] ?? 0, totalAmount: amounts[$0] ?? 0)
+            DailyTally(day: $0, count: counts[$0] ?? 0, totalAmount: amounts[$0] ?? 0)
         }
     }
 
@@ -115,6 +138,17 @@ struct ChartAggregator {
         entities.filter {
             $0.kind == kind && $0.childID == childID && $0.syncState != .pendingDelete
         }
+    }
+
+    /// Summed start→end seconds per calendar day for one kind.
+    private func durationSecondsByDay(_ entities: [LocalEntity], kind: EntityKind,
+                                      childID: Int) -> [Date: Double] {
+        var seconds = [Date: Double]()
+        for entity in matching(entities, kind: kind, childID: childID) {
+            guard let interval = durationSeconds(entity) else { continue }
+            seconds[calendar.startOfDay(for: entity.timestamp), default: 0] += interval
+        }
+        return seconds
     }
 
     /// Seconds between a payload's `start` and `end`, or nil if they don't form a positive
