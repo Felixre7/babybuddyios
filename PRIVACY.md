@@ -1,121 +1,68 @@
-# Privacy Policy — Baby Buddy for iOS
+# Privacy Policy — Baby Buddy Companion
 
-_Last updated: 2026-09-12_
+Last updated September 12, 2026
 
-Baby Buddy for iOS is a client for a **self-hosted Baby Buddy server that you provide**. The app has
-no first-party backend operated by the developer.
+**Baby Buddy Companion** ("the app") is an unofficial, open-source native client for the self-hosted [Baby Buddy](https://github.com/babybuddy/babybuddy) server. It is built and published by Kurtis Guy ("we", "us"). This policy explains what the app does — and does not — do with your information.
 
-## What the app stores
+The short version: **your baby's data lives on the Baby Buddy server you run, not with us.** The App Store build does include limited app telemetry. TelemetryDeck records generic feature use and coarse error categories, while RevenueCat processes and records optional tip purchases. Neither service receives your baby or tracking records, server address, or credentials. We do not sell data.
 
-- **On your device:** your child and tracking data is cached locally (SwiftData) so the app works
-  offline. Your server URL and API token are stored in the iOS Keychain
-  (`WhenUnlockedThisDeviceOnly` — they never leave the device or sync to iCloud).
-- **On your server:** all tracking data is sent to and read from the Baby Buddy server you configure.
-  How that server handles your data is governed by your own deployment.
+## Your tracking data stays on your server
 
-## What the app sends, and to whom
+The app is a client for a Baby Buddy server that **you** host and control. Every record you create — feedings, sleep, diaper changes, tummy time, pumping, notes, photos, your children's names and details — is stored on **your** server. The app sends that data only between your device and the server address you configure.
 
-- Your tracking data (children, feedings, sleep, etc.) goes **only** to the Baby Buddy server URL
-  you enter. None of your tracking data, your server URL, or your credentials are ever sent to the
-  developer or any third party.
-- The App Store build includes a small amount of **anonymous, non-attributed usage analytics** — see
-  below. There is **no advertising and no cross-app tracking**.
+To work offline, the app keeps a local copy of your data in its own on-device storage. That copy never leaves your device except to sync with your own server.
 
-## Analytics
+We never receive, store, or have any access to your tracking data.
 
-The App Store version of this app uses [TelemetryDeck](https://telemetrydeck.com), a privacy-focused,
-cookieless analytics service, to understand which features are used and to catch problems. It is
-designed to be **anonymous and non-attributed**:
+## Your server address and credentials
 
-- **No personal data and no baby/tracking data** is ever sent to TelemetryDeck — only generic app
-  usage signals together with coarse technical context such as app version, iOS version, device
-  model, and locale. The usage signals are limited to:
-  - **App lifecycle** — app launched / session started, and new-install detection.
-  - **Onboarding** — that sign-in completed, and whether it used the QR code or manual entry.
-  - **Timers** — that a timer was started or stopped, the activity type (e.g. feeding, sleep), and
-    whether it came from the app or a widget.
-  - **Logged activities** — that an activity record was logged, its kind (e.g. diaper change,
-    feeding, sleep, note, measurement), and which path created it (a form, a "repeat", stopping a
-    timer, or a widget/Siri action). Never the contents of the record.
-  - **Widgets** — that a widget/Siri action was performed, and which one.
-  - **Search** — that a timeline search started, completed, or returned no results.
-  - **Trends** — that the Trends tab was opened, and which rolling window was selected (7, 14, or
-    30 days). Never any of the figures shown on it.
-  - **App lock** — that an unlock was attempted, the result, and the device biometry type
-    (Face ID / Touch ID / none).
-  - **Sync & errors** — that a sync completed, that a conflict was raised, and that a conflict was
-    resolved together with which way it was settled (keep mine / use server / merge) and the record
-    kind; how a sync ended (everything sent, some items held back, stopped on a temporary problem)
-    and how many queued items were sent or are still waiting — counts only, never which records or
-    what they contain; plus coarse error categories (e.g. network vs. server-rejected) together with which sync
-    step hit them (such as "push-create-feeding"), how many times that queued item has already
-    failed, and — for a validation error — the *names* of the fields the server objected to.
-    A failed sign-in is reported the same way, as a category only — never the address or token
-    you typed. Neither the local nor the server version of a conflicted record is ever included,
-    and error reports never include the server's message text or any field's value.
-  - **Server capabilities** — when your server doesn't have an endpoint this app looks for (older
-    Baby Buddy releases lack some), its name — e.g. "pumping" — is reported once per app launch.
-    This is how we tell which server versions to keep supporting. Nothing about the server itself
-    is included: not its address, its version string, or anything it holds.
-  - **Supporter tips** — that the supporter sheet was viewed, which entry point opened it (Settings,
-    a link, or one of the support nudges below), and whether it was showing the ask, the thank-you,
-    or a notice that tips are unavailable; that a supporter reopened the amounts ("Tip again"); and
-    the coarse outcome of an optional tip (started, completed, cancelled, failed, or restored) and
-    that supporter status became active, together with the tip's size band (small / medium /
-    large). A completed tip and a sheet view also
-    carry the name of the store "offering" that served them — a label configured by the developer,
-    not anything about you. These carry only a coarse status/error code, a size band, a sheet state,
-    an offering name, and an entry-point name — never price, receipt, customer, or transaction
-    details.
-  - **Support nudges** — that a nudge inviting you to support the app was shown, dismissed, or
-    retired; which of its three variants it was; how many times nudges have been dismissed; and, for
-    a milestone nudge, the round threshold that triggered it (50 / 100 / 250 / 500 / 1000 records
-    logged on this device). Never what was logged — only how many.
-  - **Settings** — that a named setting was switched on or off. Carries the setting's name and the
-    new on/off value only, never the data the setting affects. Separately, that the Home Screen app
-    icon was changed, and which of the six shipped designs was picked — the name of a drawing, and
-    nothing about you.
-- Analytics are **not tied to your identity**. TelemetryDeck does not use cookies or stable
-  advertising identifiers; any user count is derived from a one-way, non-reversible hash and cannot
-  be traced back to you. Your IP address is not stored.
-- Because the analytics are fully anonymous, there is currently **no in-app opt-out**. If you have
-  concerns, you can block network traffic to TelemetryDeck or use a build that has analytics
-  disabled (see below).
-- See TelemetryDeck's own [privacy policy](https://telemetrydeck.com/privacy/) for details on how it
-  processes data.
+When you connect the app to your Baby Buddy server, the server URL and your login credentials (such as your API token) are stored securely in the iOS **Keychain** on your device. They are used only to authenticate with your server and are never transmitted to us or to any third party.
 
-**Open-source / self-built versions send no analytics at all.** The public source code ships without
-an analytics App ID, so any build you compile yourself (or a third party compiles) initializes no
-analytics SDK and sends nothing to TelemetryDeck.
+## Optional biometric lock
 
-## In-app purchases
+If you enable the optional Face ID / Touch ID / passcode lock, authentication is performed entirely by iOS on your device. We never see your biometric data — iOS only tells the app whether authentication succeeded.
 
-Every feature in the app is free. The App Store version uses
-[RevenueCat](https://www.revenuecat.com) to manage the optional one-time supporter tips — there is no
-subscription. It contacts the purchase backend when the app starts and when you open the supporter
-screen — to fetch the tip amounts on offer and how that screen should be presented — and when you
-actually tip or restore a purchase. It never receives your
-baby/tracking data, your server URL, or your credentials. As with analytics, **open-source / self-built
-versions ship without a RevenueCat API key**, so they initialize no purchase SDK and send nothing.
-See RevenueCat's [privacy policy](https://www.revenuecat.com/privacy/) for how it processes purchase
-data.
+## App telemetry and error reporting (App Store build only)
 
-In the App Store version, RevenueCat forwards its purchase events (e.g. a purchase, renewal, or
-refund) to TelemetryDeck on the server side so they appear alongside the analytics above. These are
-keyed only by the same anonymous, salted per-device hash used for analytics — never your Apple ID,
-receipt, or any identifying detail. This forwarding cannot happen in open-source / self-built
-versions, which ship without either a RevenueCat key or an analytics App ID.
+The App Store build **does contain telemetry**. It uses [TelemetryDeck](https://telemetrydeck.com/privacy/) to understand how the app is used and to diagnose problems. This is operational analytics, not advertising or cross-app tracking.
 
-## Biometric authentication
+The app sends:
 
-If you enable the Face ID / passcode lock, authentication is performed by iOS via
-`LocalAuthentication`. The app never receives or stores your biometric data.
+* **Generic feature-use signals** — for example, that onboarding completed, a timer started or stopped, a type of activity was logged, a widget action ran, a search returned results, or a sync completed. It never sends the contents of a record.
+* **Coarse error signals** — for example, offline, unauthorised, decoding, conflict, or an HTTP status category. Error logging never includes your server URL, request contents, server response text, credentials, or baby data.
+* **Basic technical context** supplied by the SDK — such as app and iOS version, device type, and a timestamp rounded to the nearest hour.
 
-## Data deletion
+TelemetryDeck adds an **app-scoped, salted anonymous hash** so aggregate events can be counted without a name or account. This is a technical identifier, but it is not your name, email address, Apple ID, Baby Buddy account, or advertising identifier. We do not use it to identify, profile, contact, or single out a person. TelemetryDeck does not store IP addresses.
 
-Sign out (Settings → Sign Out) clears the stored credentials. Deleting the app removes all locally
-cached data. Records on your server are managed through Baby Buddy itself.
+These limits follow TelemetryDeck's [privacy documentation](https://telemetrydeck.com/docs/guides/privacy-faq) and [error-reporting guidance](https://telemetrydeck.com/docs/articles/preset-errors). Telemetry is disabled in the app's **demo mode**. Builds compiled from the open-source repository ship without our TelemetryDeck App ID and send nothing to our analytics account.
+
+## Purchases and receipt tracking
+
+The app is free, and every feature in it is free. It includes optional **consumable support purchases**, or tips — Kind, Generous and Amazing — offered under **Settings → Baby Buddy App Supporter**. They can be made more than once, are not subscriptions, and do not unlock or change any features. Payment is handled by **Apple** through the App Store — we never see your payment details.
+
+[RevenueCat](https://www.revenuecat.com/privacy/) is used to process and track these purchases. It receives the anonymous purchase/customer identifier and the App Store receipt or transaction information needed to validate purchases and refunds. It does not receive your baby data, tracking records, server address, or credentials. We use it strictly for optional purchase and receipt tracking.
+
+The app supplies RevenueCat with the TelemetryDeck App ID and anonymous hashed user value so anonymous receipt events can be matched with purchase-flow signals. This follows TelemetryDeck's [RevenueCat integration documentation](https://telemetrydeck.com/docs/integrations/revenuecat). The value is not used to identify or isolate a person.
+
+## Who your data is shared with
+
+Putting the above together, the parties involved are:
+
+* **Your own Baby Buddy server** — receives and stores your tracking data (you control it).
+* **Apple** — processes in-app purchases, per [Apple's Privacy Policy](https://www.apple.com/legal/privacy/).
+* **RevenueCat** — processes optional tip purchases and tracks their receipts (App Store build).
+* **TelemetryDeck** — receives limited feature-use and coarse error telemetry (App Store build).
+
+We do not sell your data, and we do not share it beyond what is described here.
+
+## Children's privacy
+
+The app is a tool for parents and caregivers. Any information about a child is entered by you and stored on your own server; we do not collect it. The app is not directed at children and is not intended for use by children.
+
+## Changes to this policy
+
+We may update this policy as the app evolves. Material changes will be reflected on this page with a new "last updated" date.
 
 ## Contact
 
-For questions about this app, open an issue on the project repository.
+Questions about privacy? Email [hello@babybuddy.app](mailto:hello@babybuddy.app) or open an issue on [GitHub](https://github.com/kguy18/babybuddyios/issues).
