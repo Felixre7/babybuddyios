@@ -9,7 +9,7 @@ the version number itself, so it is never repeated in the text.
 The rest of the store listing (description, keywords, review information) lives in
 `app_store_listing.md`, which is gitignored because it stages the reviewer's demo credentials.
 
-## 1.0.2
+## 1.0.3
 
 ```
 #New
@@ -17,14 +17,22 @@ The rest of the store listing (description, keywords, review information) lives 
 - Records that could not sync show a red warning next to the sync icon on the Timeline. Open one and the reason appears at the top; tap it to jump straight to Pending Changes.
 - Queued photo uploads now appear in Pending Changes too.
 - Logging a pumping session without an amount, or an activity that ends before it starts, runs over 24 hours, or is set in the future, is caught before you save.
-- Sync and sign-in failures now report more detail, so I can find problems that only happen on certain Baby Buddy server versions. Still anonymous.
-- If a sync fails for you, please let me know roughly when — these reports should make it findable.
 
 #Fixed
 - Repeating a feeding from the Timeline no longer leaves the old end time behind, which made the copy fail to sync.
 - Child photos now upload correctly to the server.
 - Stopping a timer that was already stopped elsewhere no longer retries forever, and never creates a duplicate on its own.
 - Tag lists from some server versions now sync instead of failing.
+```
+
+## 1.0.2
+
+```
+#New
+- Sync and sign-in failures now report more detail, so I can find problems that only happen on certain Baby Buddy server versions. Still anonymous.
+- If a sync fails for you, please let me know roughly when — these reports should make it findable.
+
+#Fixed
 - Connection problems now say what actually failed. A wrong address, a server that is not on your network, and a certificate your iPhone does not trust used to all show the same "no connection" message.
 ```
 
