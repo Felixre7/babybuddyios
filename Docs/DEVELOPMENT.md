@@ -37,6 +37,7 @@ Pass these via `SIMCTL_CHILD_<NAME>` environment variables to `xcrun simctl laun
 | `BB_LOAD_OLDER=<n>` | Auto-page the timeline back `n` history chunks on launch (with `BB_DEMO`) |
 | `BB_LOCK=1` | Force the Face ID lock on |
 | `BB_NUDGE=gentle\|milestone\|banner` | Force a support-nudge surface on the Dashboard |
+| `BB_TIMER_ALERT_SECONDS=<n>` | Turn forgotten-timer alerts on and fire them `n` seconds after a timer starts, whatever Settings says |
 
 `BB_DEMO=1` is the fastest way to see the app without standing up a server — it seeds a child,
 activity history and running timers entirely locally.
