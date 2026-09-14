@@ -38,6 +38,8 @@ struct SettingsView: View {
     // The support-nudge switch. App-only defaults, not the App Group — nudges are an app-process
     // concern; the key comes from ``SupportNudgeStore`` so the two can't drift apart.
     @AppStorage(SupportNudgeStore.remindersEnabledKey) private var supportRemindersEnabled = true
+    // Mirrors ForgottenTimerPolicy.isEnabled; keep the key in sync.
+    @AppStorage(ForgottenTimerPolicy.enabledKey, store: SharedDefaults.suite) private var timerAlertsEnabled = false
     @AppStorage(UndoToastCenter.enabledKey) private var undoToastEnabled = true
 
     @State private var debugConflict: ConflictRecord?
@@ -96,6 +98,12 @@ struct SettingsView: View {
                     sectioned("Notifications") {
                         notificationsCard
                         Text("Show a running timer on the Lock Screen and Dynamic Island.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 4)
+                            .padding(.top, 2)
+                        timerAlertsCard
+                        Text("Get a notification when a timer runs longer than expected, so a forgotten one doesn't file a bogus record.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .padding(.horizontal, 4)
@@ -424,6 +432,52 @@ struct SettingsView: View {
                     .tint(BBColor.primary)
             }
         }
+    }
+
+    /// A local notification once a timer outlives its activity's threshold. Enabling asks for
+    /// notification permission; the per-activity thresholds appear once it's on.
+    private var timerAlertsCard: some View {
+        card {
+            SettingsRow(symbol: "bell.badge", tint: BBColor.restart, title: "Forgotten timer alerts") {
+                Toggle("", isOn: Binding(
+                    get: { timerAlertsEnabled },
+                    set: { newValue in
+                        timerAlertsEnabled = newValue
+                        Analytics.settingChanged("forgottenTimerAlerts", enabled: newValue)
+                        Task {
+                            if newValue { _ = await ForgottenTimerAlerts.shared.requestAuthorization() }
+                            await ForgottenTimerAlerts.shared.reconcile()
+                        }
+                    }))
+                    .labelsHidden()
+                    .tint(BBColor.primary)
+            }
+            if timerAlertsEnabled {
+                ForEach(TimerActivity.allCases, id: \.self) { activity in
+                    rowDivider
+                    SettingsRow(symbol: activity.systemImage, tint: BBColor.tint(for: activity),
+                                title: "\(activity.timerName) after") {
+                        Menu {
+                            Picker(activity.timerName, selection: thresholdBinding(activity)) {
+                                ForEach(ForgottenTimerPolicy.choices, id: \.self) {
+                                    Text(EntityFormatting.formatInterval($0)).tag($0)
+                                }
+                            }
+                        } label: { menuValue(EntityFormatting.formatInterval(ForgottenTimerPolicy.threshold(for: activity))) }
+                    }
+                }
+            }
+        }
+        .animation(.default, value: timerAlertsEnabled)
+    }
+
+    private func thresholdBinding(_ activity: TimerActivity) -> Binding<TimeInterval> {
+        Binding(
+            get: { ForgottenTimerPolicy.threshold(for: activity) },
+            set: { seconds in
+                SharedDefaults.suite.set(seconds, forKey: ForgottenTimerPolicy.thresholdKey(activity))
+                Task { await ForgottenTimerAlerts.shared.reconcile() }
+            })
     }
 
     // MARK: Appearance

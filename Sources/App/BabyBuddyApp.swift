@@ -2,6 +2,7 @@ import SwiftUI
 import SwiftData
 import BackgroundTasks
 import WidgetKit
+import UserNotifications
 
 @main
 struct BabyBuddyApp: App {
@@ -9,11 +10,12 @@ struct BabyBuddyApp: App {
     @State private var sync: SyncEngine
     @State private var purchases: PurchaseManager
     @State private var lock = AppLockManager()
-    @State private var router = DeepLinkRouter()
+    @State private var router: DeepLinkRouter
     @State private var liveActivity = LiveActivityManager()
     @State private var icons = AppIconManager()
     @Environment(\.scenePhase) private var scenePhase
     private let container: ModelContainer
+    private let timerAlerts: TimerAlertDelegate
 
     private static let refreshTaskID = "com.kurtisguy.BabyBuddy.sync"
 
@@ -45,6 +47,10 @@ struct BabyBuddyApp: App {
             }
         }
         let container = LocalStore.makeContainer()
+        let router = DeepLinkRouter()
+        _router = State(initialValue: router)
+        timerAlerts = TimerAlertDelegate(router: router)
+        UNUserNotificationCenter.current().delegate = timerAlerts
         let session = AppSession(context: container.mainContext)
         let purchases = PurchaseManager()
         purchases.start()
