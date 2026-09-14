@@ -385,7 +385,13 @@ struct TimelineRailRow: View {
     private var rowLabel: String {
         var label = EntityFormatting.accessibilityLabel(entity)
         if noteImageURL != nil { label += ", photo attached" }
+        if let next = nextDose { label += ", next dose OK at \(next.formatted(date: .omitted, time: .shortened))" }
         return label
+    }
+
+    /// When a medication's next dose is OK, while that is still ahead.
+    private var nextDose: Date? {
+        MedicationReminderPolicy.nextDose(after: entity).flatMap { $0 > .now ? $0 : nil }
     }
 
     /// A note's attached image URL, if this row is a note with an image set.
@@ -404,6 +410,14 @@ struct TimelineRailRow: View {
                     if let subtitle = EntityFormatting.subtitle(entity), !subtitle.isEmpty {
                         Text(subtitle)
                             .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                            .padding(.top, 2)
+                    }
+                    if let nextDose {
+                        HStack(spacing: 4) {
+                            Image(systemName: "clock")
+                            Text("Next dose OK at \(nextDose.formatted(date: .omitted, time: .shortened))")
+                        }
+                        .font(.caption).foregroundStyle(.secondary)
                             .padding(.top, 2)
                     }
                     let tags = EntityFormatting.tags(entity)

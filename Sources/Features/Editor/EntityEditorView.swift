@@ -65,6 +65,9 @@ struct EntityEditorView: View {
     @State private var medName = ""
     @State private var dosage = ""
     @State private var dosageUnit = "mg"
+    @State private var doseInterval: DoseInterval = .none
+    @State private var customDoseHours = ""
+    @State private var customDoseMinutes = ""
 
     @State private var confirmingDelete = false
     /// The queued write for this record that the server refused, if any. Drives the sync banner.
@@ -362,6 +365,16 @@ struct EntityEditorView: View {
                     HStack(spacing: 10) {
                         numericField(text: $dosage, unit: nil)
                         plainField("Unit", text: $dosageUnit).frame(width: 92)
+                    }
+                }
+                fieldLabeled("Next dose after") {
+                    menuField(options: [.none] + MedicationReminderPolicy.choices.map(DoseInterval.preset) + [.custom],
+                              selection: $doseInterval) { $0.label }
+                    if doseInterval == .custom {
+                        HStack(spacing: 10) {
+                            numericField(text: $customDoseHours, unit: "h")
+                            numericField(text: $customDoseMinutes, unit: "m")
+                        }
                     }
                 }
             }
@@ -679,6 +692,15 @@ struct EntityEditorView: View {
         medName = p["name"] as? String ?? ""
         if let d = p["dosage"] as? Double { dosage = trimmed(d) }
         dosageUnit = p["dosage_unit"] as? String ?? dosageUnit
+        if let raw = p["next_dose_interval"] as? String, let seconds = APIDuration.parse(raw), seconds > 0 {
+            if MedicationReminderPolicy.choices.contains(seconds) {
+                doseInterval = .preset(seconds)
+            } else {
+                doseInterval = .custom
+                customDoseHours = String(Int(seconds) / 3600)
+                customDoseMinutes = String(Int(seconds) % 3600 / 60)
+            }
+        }
         for key in ["weight", "height", "head_circumference", "bmi", "temperature"] {
             if let v = p[key] as? Double { value = trimmed(v) }
         }
@@ -774,6 +796,7 @@ struct EntityEditorView: View {
             p["name"] = medName; p["time"] = iso(time)
             if let d = ActivityDraft.number(dosage) { p["dosage"] = d }
             p["dosage_unit"] = dosageUnit
+            p["next_dose_interval"] = doseIntervalSeconds.map(APIDuration.string(from:)) ?? NSNull()
             p["notes"] = notes; p["tags"] = tagList
         case .timer, .child:
             break
@@ -783,8 +806,33 @@ struct EntityEditorView: View {
         return p
     }
 
+    /// The chosen next-dose interval in seconds; a blank or zero custom entry means none.
+    private var doseIntervalSeconds: TimeInterval? {
+        switch doseInterval {
+        case .none: return nil
+        case .preset(let seconds): return seconds
+        case .custom:
+            let seconds = (ActivityDraft.number(customDoseHours) ?? 0) * 3600
+                + (ActivityDraft.number(customDoseMinutes) ?? 0) * 60
+            return seconds > 0 ? seconds : nil
+        }
+    }
+
     private func trimmed(_ value: Double) -> String {
         value == value.rounded() ? String(Int(value)) : String(value)
+    }
+}
+
+/// A medication's next-dose interval as the editor offers it: none, a preset, or typed in.
+private enum DoseInterval: Hashable {
+    case none, preset(TimeInterval), custom
+
+    var label: String {
+        switch self {
+        case .none: return "None"
+        case .preset(let seconds): return EntityFormatting.formatInterval(seconds)
+        case .custom: return "Custom"
+        }
     }
 }
 

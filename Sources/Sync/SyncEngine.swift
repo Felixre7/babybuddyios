@@ -78,6 +78,8 @@ final class SyncEngine {
         // serverID (a multipart PATCH needs it).
         let uploads = await drainImageUploads()
         let pulledChanges = await pullAll()
+        // A dose or timer logged elsewhere reschedules its local notification, background syncs too.
+        if pulledChanges { await LocalAlerts.shared.reconcile() }
         let changed = push.delivered > 0 || uploads.delivered > 0 || pulledChanges
         // Only report a sync that actually did work — most syncs (foreground, pull-to-refresh,
         // after each timer action, background) are no-ops, which would otherwise be pure noise.

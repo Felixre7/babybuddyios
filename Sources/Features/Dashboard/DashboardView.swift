@@ -100,6 +100,9 @@ struct DashboardView: View {
                         }
                     }
 
+                    let doses = waitingDoses
+                    if !doses.isEmpty { nextDoseSection(doses) }
+
                     if inlineNudge == .banner, !nudgesSilenced {
                         SupportBanner(
                             onSupport: { acceptNudge(.banner) },
@@ -459,6 +462,50 @@ struct DashboardView: View {
             .buttonStyle(.plain)
     }
 
+    // MARK: Next dose
+
+    /// Medications whose next dose isn't OK yet, each with a countdown. The timeline redraws at
+    /// each dose's time, so a row leaves as soon as its dose is OK. (Its `context.date` is the
+    /// schedule entry, which for an explicit schedule starts at the first dose — hence `.now`.)
+    private func nextDoseSection(_ doses: [(dose: LocalEntity, next: Date)]) -> some View {
+        SwiftUI.TimelineView(.explicit(doses.map(\.next))) { _ in
+            let now = Date.now
+            let waiting = doses.filter { $0.next > now }
+            if !waiting.isEmpty {
+                VStack(alignment: .leading, spacing: 9) {
+                    SectionHeader("Next dose")
+                    VStack(spacing: 9) {
+                        ForEach(waiting, id: \.dose.localID) { wait in
+                            Button { editing = wait.dose } label: {
+                                nextDoseRow(wait.dose, next: wait.next, now: now)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func nextDoseRow(_ dose: LocalEntity, next: Date, now: Date) -> some View {
+        let name = dose.payloadObject["name"] as? String ?? "Medication"
+        let time = next.formatted(date: .omitted, time: .shortened)
+        return BBCard(cornerRadius: BBRadius.row, padding: 13) {
+            HStack(spacing: 12) {
+                ActivityTile(kind: .medication, size: 40, glyph: 21)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(name).font(.subheadline.weight(.semibold))
+                    Text("Next dose OK at \(time)").font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 8)
+                Text(timerInterval: now...next, countsDown: true)
+                    .font(.subheadline.weight(.semibold)).monospacedDigit()
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(name), next dose OK at \(time)")
+    }
+
     // MARK: Latest
 
     private var latestSection: some View {
@@ -560,6 +607,14 @@ struct DashboardView: View {
 
     private var latestEvents: [LocalEntity] {
         recentKinds.compactMap { lastEvent(of: $0) }.sorted { $0.timestamp > $1.timestamp }
+    }
+
+    /// The newest dose of each medication whose next dose is still ahead, soonest first.
+    private var waitingDoses: [(dose: LocalEntity, next: Date)] {
+        MedicationReminderPolicy.latestDoses(childEntities)
+            .compactMap { dose in MedicationReminderPolicy.nextDose(after: dose).map { (dose, $0) } }
+            .filter { $0.next > .now }
+            .sorted { $0.next < $1.next }
     }
 
     private var activeTimers: [LocalEntity] {

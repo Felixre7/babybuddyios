@@ -22,7 +22,7 @@ final class LiveActivityManager {
     /// activities, update a changed one, and request a missing one. Safe to call repeatedly.
     func reconcile() async {
         // The forgotten-timer alerts track the same running-timer set, so they ride every reconcile.
-        await ForgottenTimerAlerts.shared.reconcile()
+        await LocalAlerts.shared.reconcile()
         // Respect the in-app setting and the system permission — if either is off, clear anything
         // we have and stop.
         guard SharedDefaults.liveActivitiesEnabled, ActivityAuthorizationInfo().areActivitiesEnabled else {

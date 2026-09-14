@@ -1,0 +1,238 @@
+import Foundation
+import SwiftData
+import UserNotifications
+
+/// Which running timers deserve a "still running" nudge, and when. Pure so it's testable; the
+/// thresholds are per activity and live in the App Group defaults (Settings › Notifications).
+enum ForgottenTimerPolicy {
+    static let enabledKey = "forgottenTimerAlertsEnabled"
+    static var isEnabled: Bool {
+        #if DEBUG
+        if ProcessInfo.processInfo.environment["BB_TIMER_ALERT_SECONDS"] != nil { return true }
+        #endif
+        return SharedDefaults.suite.bool(forKey: enabledKey)
+    }
+
+    /// The threshold choices Settings offers, in seconds.
+    static let choices: [TimeInterval] = [1800, 3600, 7200, 14_400, 28_800, 43_200, 86_400]
+
+    static func thresholdKey(_ activity: TimerActivity) -> String { "forgottenTimerThreshold.\(activity.rawValue)" }
+
+    static func defaultThreshold(_ activity: TimerActivity?) -> TimeInterval {
+        switch activity {
+        case .feeding, .pumping: return 7200
+        case .sleep: return 43_200
+        case .tummyTime: return 3600
+        case nil: return 14_400 // ponytail: untyped timers aren't configurable; add a row if asked
+        }
+    }
+
+    /// The configured threshold for an activity. `BB_TIMER_ALERT_SECONDS=<n>` (DEBUG) turns alerts
+    /// on and overrides every threshold so the alert can be exercised without waiting hours.
+    static func threshold(for activity: TimerActivity?) -> TimeInterval {
+        #if DEBUG
+        if let s = ProcessInfo.processInfo.environment["BB_TIMER_ALERT_SECONDS"], let n = Double(s) {
+            return n
+        }
+        #endif
+        guard let activity else { return defaultThreshold(nil) }
+        let stored = SharedDefaults.suite.double(forKey: thresholdKey(activity))
+        return stored > 0 ? stored : defaultThreshold(activity)
+    }
+
+    struct Request: Equatable {
+        let id: String
+        let fireDate: Date
+        let title: String
+        let body: String
+        let url: String
+    }
+
+    static func identifier(for timer: LocalEntity) -> String { "timer-\(timer.localID.uuidString)" }
+
+    /// The notification a running timer should fire once it passes its threshold.
+    static func request(for timer: LocalEntity, childName: String?,
+                        threshold: TimeInterval? = nil) -> Request {
+        let activity = TimerActivity(timer: timer)
+        let limit = threshold ?? self.threshold(for: activity)
+        let name = activity?.timerName ?? (timer.payloadObject["name"] as? String) ?? "Timer"
+        let owner = childName.map { "\($0)'s " } ?? ""
+        return Request(
+            id: identifier(for: timer),
+            fireDate: timer.timestamp.addingTimeInterval(limit),
+            title: "\(name) timer still running",
+            body: "\(owner)\(name.lowercased()) timer has been running for "
+                + "\(EntityFormatting.formatInterval(limit)). Tap to stop it.",
+            url: "babybuddy://timer/\(timer.localID.uuidString)")
+    }
+
+    /// Diff wanted requests against what the notification center already holds, for the requests
+    /// whose identifiers start with `prefix`: schedule what's missing or moved, drop what is no
+    /// longer wanted. A request that has already been delivered is left alone so it nags once, not
+    /// on every foreground. With `firesOverdue` a request whose time has already passed is
+    /// scheduled "now" and so can't be date-matched — it is kept as long as it is pending at all;
+    /// without it, an overdue request that was never scheduled is skipped.
+    static func plan(wanted: [Request], pending: [String: Date], delivered: Set<String>,
+                     now: Date = .now, prefix: String = "timer-",
+                     firesOverdue: Bool = true) -> (add: [Request], remove: [String]) {
+        let wantedIDs = Set(wanted.map(\.id))
+        let add = wanted.filter { request in
+            guard !delivered.contains(request.id) else { return false }
+            guard let scheduled = pending[request.id] else { return firesOverdue || request.fireDate > now }
+            return request.fireDate > now && scheduled != request.fireDate
+        }
+        let remove = pending.keys.filter { $0.hasPrefix(prefix) && !wantedIDs.contains($0) }
+        return (add, remove.sorted())
+    }
+}
+
+/// When a medication's next dose is OK, and the reminder that says so. Mirrors upstream Baby
+/// Buddy's `next_dose_time` (`time + next_dose_interval`), except that only the newest dose of each
+/// medication per child counts: a later dose supersedes an earlier one's reminder.
+enum MedicationReminderPolicy {
+    static let enabledKey = "medicationRemindersEnabled"
+    static var isEnabled: Bool { SharedDefaults.suite.bool(forKey: enabledKey) }
+
+    /// The intervals the editor offers before "Custom", in seconds.
+    static let choices: [TimeInterval] = [14_400, 21_600, 28_800, 43_200, 86_400]
+
+    /// When the dose after this one is OK, or `nil` if it has no interval.
+    static func nextDose(after dose: LocalEntity) -> Date? {
+        guard dose.kind == .medication,
+              let raw = dose.payloadObject["next_dose_interval"] as? String,
+              let interval = APIDuration.parse(raw), interval > 0 else { return nil }
+        return dose.timestamp.addingTimeInterval(interval)
+    }
+
+    /// The newest dose of each medication per child, newest first. Names match case-insensitively.
+    static func latestDoses(_ entities: [LocalEntity]) -> [LocalEntity] {
+        var seen = Set<String>()
+        return entities
+            .filter { $0.kind == .medication && $0.syncState != .pendingDelete }
+            .sorted { $0.timestamp > $1.timestamp }
+            .filter { dose in
+                let name = (dose.payloadObject["name"] as? String ?? "").trimmingCharacters(in: .whitespaces)
+                return seen.insert("\(dose.childID ?? 0)|\(name.lowercased())").inserted
+            }
+    }
+
+    static func identifier(for dose: LocalEntity) -> String { "medication-\(dose.localID.uuidString)" }
+
+    /// The "next dose OK" notification for a dose, or `nil` if it has no interval.
+    static func request(for dose: LocalEntity, childName: String?) -> ForgottenTimerPolicy.Request? {
+        guard let fire = nextDose(after: dose) else { return nil }
+        let name = dose.payloadObject["name"] as? String ?? "Medication"
+        let owner = childName.map { "\($0)'s" } ?? "the"
+        return ForgottenTimerPolicy.Request(
+            id: identifier(for: dose),
+            fireDate: fire,
+            title: "\(name): next dose OK",
+            body: "\(EntityFormatting.formatInterval(fire.timeIntervalSince(dose.timestamp))) since \(owner) "
+                + "last dose at \(dose.timestamp.formatted(date: .omitted, time: .shortened)).",
+            url: "babybuddy://home")
+    }
+}
+
+/// Keeps the app's local notifications — forgotten-timer alerts and medication next-dose
+/// reminders — in step with the shared store. Mirrors ``LiveActivityManager``: one idempotent
+/// ``reconcile()`` that ``LiveActivityManager/reconcile()`` calls, so every timer start/stop/discard,
+/// editor save/delete and app foreground already covers it; ``SyncEngine`` adds a pull that
+/// brought changes (a dose logged on the web).
+@MainActor
+final class LocalAlerts {
+    static let shared = LocalAlerts()
+    private let center = UNUserNotificationCenter.current()
+
+    func reconcile() async {
+        let timersOn = ForgottenTimerPolicy.isEnabled, dosesOn = MedicationReminderPolicy.isEnabled
+        // The setting can arrive on before permission was ever asked (a restored App Group
+        // default); ask now rather than schedule alerts that can never show.
+        if timersOn || dosesOn, await center.notificationSettings().authorizationStatus == .notDetermined {
+            _ = await requestAuthorization()
+        }
+        let pending = Dictionary(uniqueKeysWithValues: await center.pendingNotificationRequests()
+            .compactMap { request -> (String, Date)? in
+                guard let trigger = request.trigger as? UNCalendarNotificationTrigger,
+                      let date = trigger.nextTriggerDate() else { return nil }
+                return (request.identifier, date)
+            })
+        let delivered = Set(await center.deliveredNotifications().map(\.request.identifier))
+        let wanted = timersOn || dosesOn ? wantedRequests() : (timers: [], doses: [])
+
+        // A dose reminder that is already overdue when first seen (an old dose, or the app opened
+        // long after) says nothing useful, so only timers fire late.
+        for (prefix, requests, firesOverdue) in [("timer-", timersOn ? wanted.timers : [], true),
+                                                 ("medication-", dosesOn ? wanted.doses : [], false)] {
+            let plan = ForgottenTimerPolicy.plan(wanted: requests, pending: pending, delivered: delivered,
+                                                 prefix: prefix, firesOverdue: firesOverdue)
+            center.removePendingNotificationRequests(withIdentifiers: plan.remove)
+            // A stopped timer's or superseded dose's delivered banner is stale too; a live one stays.
+            let wantedIDs = Set(requests.map(\.id))
+            center.removeDeliveredNotifications(withIdentifiers: delivered.filter {
+                $0.hasPrefix(prefix) && !wantedIDs.contains($0)
+            })
+            for request in plan.add {
+                let content = UNMutableNotificationContent()
+                content.title = request.title
+                content.body = request.body
+                content.sound = .default
+                content.userInfo = ["url": request.url]
+                // A timer already past its threshold (app opened hours later) fires straight away.
+                let fire = max(request.fireDate, Date().addingTimeInterval(1))
+                let components = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute, .second], from: fire)
+                let trigger = UNCalendarNotificationTrigger(dateMatching: components, repeats: false)
+                try? await center.add(UNNotificationRequest(identifier: request.id, content: content, trigger: trigger))
+            }
+        }
+    }
+
+    /// Ask for permission; returns whether alerts may be shown. Called from the Settings toggles.
+    func requestAuthorization() async -> Bool {
+        (try? await center.requestAuthorization(options: [.alert, .sound])) ?? false
+    }
+
+    /// Every running timer, and the newest dose of each medication, in the shared store as wanted
+    /// requests. Opens its own container, like the Live Activity manager, so widget-started timers
+    /// are seen too.
+    private func wantedRequests() -> (timers: [ForgottenTimerPolicy.Request], doses: [ForgottenTimerPolicy.Request]) {
+        guard let container = try? ModelContainer(
+            for: LocalStore.schema,
+            configurations: ModelConfiguration(schema: LocalStore.schema, url: LocalStore.storeURL))
+        else { return ([], []) }
+        let context = ModelContext(container)
+        func fetch(_ kind: String) -> [LocalEntity] {
+            (try? context.fetch(FetchDescriptor<LocalEntity>(predicate: #Predicate { $0.kindRaw == kind }))) ?? []
+        }
+        let children = fetch("child")
+        func firstName(_ childID: Int?) -> String? {
+            let first = children.first { $0.serverID == childID }?.payloadObject["first_name"] as? String
+            return first.flatMap { $0.isEmpty ? nil : $0 }
+        }
+        let timers = fetch("timer").filter { $0.syncState != .pendingDelete }.map {
+            ForgottenTimerPolicy.request(for: $0, childName: firstName($0.childID))
+        }
+        let doses = MedicationReminderPolicy.latestDoses(fetch("medication")).compactMap {
+            MedicationReminderPolicy.request(for: $0, childName: firstName($0.childID))
+        }
+        return (timers, doses)
+    }
+}
+
+/// Routes a tapped timer alert into the app (the Stop sheet, via the existing deep link) and lets
+/// one show as a banner while the app is in the foreground.
+final class TimerAlertDelegate: NSObject, UNUserNotificationCenterDelegate {
+    private let router: DeepLinkRouter
+    init(router: DeepLinkRouter) { self.router = router }
+
+    func userNotificationCenter(_ center: UNUserNotificationCenter,
+                                willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
+        [.banner, .list, .sound] // keep it in Notification Center if the banner is missed
+    }
+
+    func userNotificationCenter(_ center: UNUserNotificationCenter,
+                                didReceive response: UNNotificationResponse) async {
+        if let raw = response.notification.request.content.userInfo["url"] as? String, let url = URL(string: raw) {
+            await MainActor.run { router.handle(url) }
+        }
+    }
+}
