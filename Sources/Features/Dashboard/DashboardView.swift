@@ -24,6 +24,8 @@ struct DashboardView: View {
     @State private var navPath: [EntityKind] = []
     @State private var addKind: EntityKind?
     @State private var editing: LocalEntity?
+    /// A dose whose reminder was tapped: the editor opens a new dose pre-filled from it.
+    @State private var repeatingDose: LocalEntity?
     @State private var startingTimer = false
     @State private var quickAddOpen = false
     @State private var showAllActivities = false
@@ -146,6 +148,9 @@ struct DashboardView: View {
             .sheet(item: $editing) { entity in
                 EntityEditorView(kind: entity.kind, childID: selectedChildID, entity: entity)
             }
+            .sheet(item: $repeatingDose) { dose in
+                EntityEditorView(kind: .medication, childID: dose.childID ?? selectedChildID, template: dose)
+            }
             .sheet(isPresented: $startingTimer) {
                 StartTimerSheet(childID: selectedChildID)
             }
@@ -173,11 +178,13 @@ struct DashboardView: View {
             .onChange(of: router.openTimerLocalID) { _, id in openTimerActions(id) }
             .onChange(of: router.convertTarget) { _, target in openConvert(target) }
             .onChange(of: router.openDayKind) { _, kind in openDay(kind) }
+            .onChange(of: router.repeatDoseLocalID) { _, id in openRepeatDose(id) }
             .onAppear {
                 // handle a deep link that arrived before this view existed
                 openTimerActions(router.openTimerLocalID)
                 openConvert(router.convertTarget)
                 openDay(router.openDayKind)
+                openRepeatDose(router.repeatDoseLocalID)
                 #if DEBUG
                 if let raw = ProcessInfo.processInfo.environment["BB_OPEN"], !children.isEmpty {
                     if raw == "timer", !startingTimer {
@@ -527,6 +534,16 @@ struct DashboardView: View {
         else { return }
         stoppingTimer = timer
         router.openTimerLocalID = nil
+    }
+
+    /// Open a new dose pre-filled from the one a tapped medication reminder was about. Looked up in
+    /// the store, not the selected child's query, since the dose may be a sibling's.
+    private func openRepeatDose(_ id: UUID?) {
+        guard let id else { return }
+        router.repeatDoseLocalID = nil
+        if let dose = LocalStore.fetch(localID: id, in: context), dose.kind == .medication {
+            repeatingDose = dose
+        }
     }
 
     /// Open the pre-filled convert editor for a timer arriving via deep link — the widget Stop

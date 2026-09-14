@@ -110,10 +110,24 @@ enum MedicationReminderPolicy {
         return entities
             .filter { $0.kind == .medication && $0.syncState != .pendingDelete }
             .sorted { $0.timestamp > $1.timestamp }
-            .filter { dose in
-                let name = (dose.payloadObject["name"] as? String ?? "").trimmingCharacters(in: .whitespaces)
-                return seen.insert("\(dose.childID ?? 0)|\(name.lowercased())").inserted
-            }
+            .filter { seen.insert("\($0.childID ?? 0)|\(normalizedName($0.payloadObject["name"] as? String))").inserted }
+    }
+
+    /// The newest dose of `name` for a child while its next dose is still ahead of `now` — what the
+    /// editor warns about before another dose is logged.
+    static func doseNotYetOK(named name: String, childID: Int, in entities: [LocalEntity],
+                             now: Date = .now) -> (dose: LocalEntity, next: Date)? {
+        let key = normalizedName(name)
+        guard !key.isEmpty,
+              let dose = latestDoses(entities).first(where: {
+                  $0.childID == childID && normalizedName($0.payloadObject["name"] as? String) == key
+              }),
+              let next = nextDose(after: dose), next > now else { return nil }
+        return (dose, next)
+    }
+
+    private static func normalizedName(_ name: String?) -> String {
+        (name ?? "").trimmingCharacters(in: .whitespaces).lowercased()
     }
 
     static func identifier(for dose: LocalEntity) -> String { "medication-\(dose.localID.uuidString)" }
@@ -129,7 +143,7 @@ enum MedicationReminderPolicy {
             title: "\(name): next dose OK",
             body: "\(EntityFormatting.formatInterval(fire.timeIntervalSince(dose.timestamp))) since \(owner) "
                 + "last dose at \(dose.timestamp.formatted(date: .omitted, time: .shortened)).",
-            url: "babybuddy://home")
+            url: "babybuddy://dose/\(dose.localID.uuidString)")
     }
 }
 
@@ -218,8 +232,14 @@ final class LocalAlerts {
     }
 }
 
-/// Routes a tapped timer alert into the app (the Stop sheet, via the existing deep link) and lets
-/// one show as a banner while the app is in the foreground.
+/// Routes a tapped alert into the app through its deep link (a timer's Stop sheet, or a new dose
+/// pre-filled from the last one) and lets one show as a banner while the app is in the foreground.
+///
+/// Main-actor isolated because UIKit finishes handling a response (a state-restoration snapshot)
+/// when `didReceive` returns and asserts that happens on the main thread; nonisolated, the async
+/// method returned on the cooperative pool and a tap that brought the app back from the background
+/// crashed.
+@MainActor
 final class TimerAlertDelegate: NSObject, UNUserNotificationCenterDelegate {
     private let router: DeepLinkRouter
     init(router: DeepLinkRouter) { self.router = router }
@@ -232,7 +252,7 @@ final class TimerAlertDelegate: NSObject, UNUserNotificationCenterDelegate {
     func userNotificationCenter(_ center: UNUserNotificationCenter,
                                 didReceive response: UNNotificationResponse) async {
         if let raw = response.notification.request.content.userInfo["url"] as? String, let url = URL(string: raw) {
-            await MainActor.run { router.handle(url) }
+            router.handle(url)
         }
     }
 }

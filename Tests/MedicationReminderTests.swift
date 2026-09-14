@@ -61,7 +61,20 @@ final class MedicationReminderTests: XCTestCase {
         XCTAssertEqual(request.title, "Tylenol: next dose OK")
         XCTAssertEqual(request.body,
                        "4h since Maya's last dose at \(time.formatted(date: .omitted, time: .shortened)).")
+        XCTAssertEqual(request.url, "babybuddy://dose/\(tylenol.localID.uuidString)")
         XCTAssertNil(MedicationReminderPolicy.request(for: dose("Motrin", every: nil), childName: nil))
+    }
+
+    func testWarnsOnlyWhileTheNewestDoseIsNotYetOK() {
+        let doses = [dose("Tylenol", every: "06:00:00"), dose("Tylenol", at: 3600, every: "06:00:00")]
+        let wait = MedicationReminderPolicy.doseNotYetOK(named: " tylenol", childID: 1, in: doses,
+                                                         now: time.addingTimeInterval(4 * 3600))
+        XCTAssertEqual(wait?.dose.localID, doses[1].localID)
+        XCTAssertEqual(wait?.next, time.addingTimeInterval(7 * 3600))
+        XCTAssertNil(MedicationReminderPolicy.doseNotYetOK(named: "Tylenol", childID: 1, in: doses,
+                                                           now: time.addingTimeInterval(7 * 3600)))
+        XCTAssertNil(MedicationReminderPolicy.doseNotYetOK(named: "Tylenol", childID: 2, in: doses, now: time))
+        XCTAssertNil(MedicationReminderPolicy.doseNotYetOK(named: "", childID: 1, in: doses, now: time))
     }
 
     func testPlanSkipsOverdueDosesAndLeavesTimersAlone() {
