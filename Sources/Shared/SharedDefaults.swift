@@ -11,6 +11,8 @@ enum SharedDefaults {
     private static let isSupporterKey = "isSupporter"
     private static let quickFeedTypeKey = "quickFeedType"
     private static let quickFeedMethodKey = "quickFeedMethod"
+    private static let lastSyncDateKey = "lastSyncDate"
+    static let stalenessThresholdKey = "stalenessThresholdMinutes"
 
     /// Whether the customer has tipped at least once. Written by the app (from ``PurchaseManager``)
     /// and readable by the widgets / App Intents across the process boundary. Nothing is gated on
@@ -51,5 +53,18 @@ enum SharedDefaults {
     static var liveActivitiesEnabled: Bool {
         get { suite.object(forKey: liveActivitiesEnabledKey) as? Bool ?? true }
         set { suite.set(newValue, forKey: liveActivitiesEnabledKey) }
+    }
+
+    /// When the app last pulled successfully — written by ``SyncEngine``, read by the status
+    /// widget for its freshness stamp. `nil` until the first sync.
+    static var lastSyncDate: Date? {
+        get { suite.object(forKey: lastSyncDateKey) as? Date }
+        set { suite.set(newValue, forKey: lastSyncDateKey) }
+    }
+
+    /// Minutes since the last sync after which the freshness stamp turns to the warning colour;
+    /// `0` is Off. Mirrored by the `@AppStorage` binding in Settings — keep the key in sync.
+    static var stalenessThresholdMinutes: Int {
+        suite.object(forKey: stalenessThresholdKey) as? Int ?? SyncFreshness.defaultThresholdMinutes
     }
 }
