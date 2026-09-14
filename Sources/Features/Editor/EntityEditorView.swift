@@ -105,9 +105,11 @@ struct EntityEditorView: View {
                     Button("Save", action: save).disabled(!isValid).tint(BBColor.brandAccent)
                 }
             }
-            .confirmationDialog("Delete this \(kind.displayName.lowercased())?",
-                                isPresented: $confirmingDelete, titleVisibility: .visible) {
+            // `.alert`, not `confirmationDialog` — iOS 26 anchors the latter to its source as a
+            // popover and drops the cancel action, leaving a destructive prompt with no way back.
+            .alert("Delete this \(kind.displayName.lowercased())?", isPresented: $confirmingDelete) {
                 Button("Delete", role: .destructive, action: delete)
+                Button("Cancel", role: .cancel) {}
             }
             .onAppear(perform: populate)
             .onAppear(perform: loadBlockedMutation)
