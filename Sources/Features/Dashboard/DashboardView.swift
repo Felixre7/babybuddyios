@@ -13,6 +13,8 @@ struct DashboardView: View {
     @Environment(AppLockManager.self) private var lock
     @Environment(\.scenePhase) private var scenePhase
     @Binding var selectedChildID: Int
+    @AppStorage(SharedDefaults.stalenessThresholdKey, store: SharedDefaults.suite)
+    private var stalenessThresholdMinutes = SyncFreshness.defaultThresholdMinutes
 
     /// The records the Dashboard actually reads, filtered store-side: the selected child's
     /// events, every child record (for the header/switcher), and every timer (deep links can
@@ -116,6 +118,9 @@ struct DashboardView: View {
             .navigationBarTitleDisplayMode(.inline)
             .navigationDestination(for: EntityKind.self) { kind in
                 DayTimelineView(kind: kind, childID: selectedChildID)
+            }
+            .overlay(alignment: .bottom) {
+                UndoToastView().padding(.bottom, 84) // clear of the floating add button
             }
             .overlay {
                 if !children.isEmpty {
@@ -318,9 +323,26 @@ struct DashboardView: View {
                 Text(Date.now, format: .dateTime.weekday(.wide).month().day())
                     .font(.subheadline).foregroundStyle(.secondary)
                 Text(currentChildName).font(.title.weight(.semibold))
+                freshnessStamp
             }
             Spacer()
             avatar
+        }
+    }
+
+    /// "Updated 4m ago" — how fresh the cache is, since every "last fed" below is only as true as
+    /// the last pull. Warning colour once it's older than the Settings threshold. Re-evaluated
+    /// each minute by `TimelineView` so the age and the colour keep up without a sync.
+    private var freshnessStamp: some View {
+        SwiftUI.TimelineView(.periodic(from: .now, by: 60)) { context in
+            let stale = SyncFreshness.isStale(
+                lastSync: sync.lastSyncDate, now: context.date,
+                thresholdMinutes: stalenessThresholdMinutes)
+            Label(SyncFreshness.label(lastSync: sync.lastSyncDate, now: context.date),
+                  systemImage: stale ? "exclamationmark.arrow.triangle.2.circlepath"
+                                     : "arrow.triangle.2.circlepath")
+                .font(.caption.weight(.medium))
+                .foregroundStyle(stale ? BBColor.warning : .secondary)
         }
     }
 

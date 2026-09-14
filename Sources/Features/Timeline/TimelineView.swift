@@ -99,6 +99,7 @@ struct TimelineView: View {
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
             .background(BBColor.surface)
+            .overlay(alignment: .bottom) { UndoToastView().padding(.bottom, 12) }
             .navigationTitle("Timeline")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

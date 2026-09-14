@@ -29,6 +29,8 @@ struct SettingsView: View {
     @AppStorage("selectedChildID", store: SharedDefaults.suite) private var selectedChildID = 0
     // Mirrors SharedDefaults.liveActivitiesEnabled; keep the key and default in sync.
     @AppStorage("liveActivitiesEnabled", store: SharedDefaults.suite) private var liveActivitiesEnabled = true
+    @AppStorage(SharedDefaults.stalenessThresholdKey, store: SharedDefaults.suite)
+    private var stalenessThresholdMinutes = SyncFreshness.defaultThresholdMinutes
     // Mirror SharedDefaults.quickFeedType/Method — the Quick Log widget's one-tap Feeding
     // defaults, read by the widget's intent. Keep the keys and defaults in sync.
     @AppStorage("quickFeedType", store: SharedDefaults.suite) private var quickFeedType: FeedingType = .breastMilk
@@ -38,6 +40,7 @@ struct SettingsView: View {
     @AppStorage(SupportNudgeStore.remindersEnabledKey) private var supportRemindersEnabled = true
     // Mirrors ForgottenTimerPolicy.isEnabled; keep the key in sync.
     @AppStorage(ForgottenTimerPolicy.enabledKey, store: SharedDefaults.suite) private var timerAlertsEnabled = false
+    @AppStorage(UndoToastCenter.enabledKey) private var undoToastEnabled = true
 
     @State private var debugConflict: ConflictRecord?
     @State private var debugIcons = false
@@ -292,6 +295,17 @@ struct SettingsView: View {
             rowDivider
 
             conflictRow
+            rowDivider
+            SettingsRow(symbol: "clock.arrow.circlepath", tint: BBColor.warning,
+                        title: "Stale after") {
+                Menu {
+                    Picker("Stale after", selection: $stalenessThresholdMinutes) {
+                        ForEach(SyncFreshness.thresholdOptions, id: \.self) {
+                            Text(SyncFreshness.thresholdLabel($0)).tag($0)
+                        }
+                    }
+                } label: { menuValue(SyncFreshness.thresholdLabel(stalenessThresholdMinutes)) }
+            }
         }
     }
 
@@ -509,6 +523,17 @@ struct SettingsView: View {
                         ForEach(FeedingMethod.allCases) { Text($0.label).tag($0) }
                     }
                 } label: { menuValue(quickFeedMethod.label) }
+            }
+            rowDivider
+            SettingsRow(symbol: "arrow.uturn.backward", tint: BBColor.brand, title: "Undo after logging") {
+                Toggle("", isOn: Binding(
+                    get: { undoToastEnabled },
+                    set: { newValue in
+                        undoToastEnabled = newValue
+                        Analytics.settingChanged("undoToast", enabled: newValue)
+                    }))
+                    .labelsHidden()
+                    .tint(BBColor.primary)
             }
         }
     }

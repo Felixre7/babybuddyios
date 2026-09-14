@@ -10,7 +10,10 @@ final class SyncEngine {
     enum Status: Equatable { case idle, syncing, failed(String) }
 
     private(set) var status: Status = .idle
-    private(set) var lastSyncDate: Date?
+    /// Persisted to the App Group so the stamp survives relaunch and the widget can show it.
+    private(set) var lastSyncDate: Date? = SharedDefaults.lastSyncDate {
+        didSet { SharedDefaults.lastSyncDate = lastSyncDate }
+    }
 
     private let session: AppSession
     private let context: ModelContext

@@ -41,7 +41,10 @@ struct BabyBuddyApp: App {
             SupportNudgeStore.shared.registerFirstLaunch()
             // Count records logged in the app, which is the nudge policy's usage gate. See the hook's
             // documentation for why `LocalRepository` doesn't reach for the store directly.
-            LocalRepository.didLogActivity = { SupportNudgeStore.shared.recordLoggedEntry() }
+            LocalRepository.didLogActivity = { entity in
+                SupportNudgeStore.shared.recordLoggedEntry()
+                if UndoToastCenter.isEnabled { UndoToastCenter.shared.show(entity) }
+            }
         }
         let container = LocalStore.makeContainer()
         let router = DeepLinkRouter()
