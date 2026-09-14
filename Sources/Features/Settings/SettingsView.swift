@@ -153,7 +153,8 @@ struct SettingsView: View {
             }
             .background(BBColor.surface)
             .navigationTitle("Settings")
-            .confirmationDialog("Contact Support", isPresented: $showingContactOptions, titleVisibility: .visible) {
+            // `.alert`, not `confirmationDialog`, which iOS 26 shows as a popover without its Cancel.
+            .alert("Contact Support", isPresented: $showingContactOptions) {
                 Button("Include Device Details") { presentMail(includeDiagnostics: true) }
                 Button("Don't Include") { presentMail(includeDiagnostics: false) }
                 Button("Cancel", role: .cancel) {}
