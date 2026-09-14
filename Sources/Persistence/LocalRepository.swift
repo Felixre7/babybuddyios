@@ -15,7 +15,7 @@ struct LocalRepository {
     /// which can't reach the app's own `UserDefaults` (and so can't touch the support-nudge counters
     /// that hang off this). ``BabyBuddyApp`` installs the hook at launch; in the extension it stays
     /// `nil` and the notification is simply dropped.
-    static var didLogActivity: (() -> Void)?
+    static var didLogActivity: ((LocalEntity) -> Void)?
 
     // MARK: Create
 
@@ -42,7 +42,7 @@ struct LocalRepository {
         // through this method). Timer start/stop are tracked separately at their call sites.
         if kind != .timer && kind != .child {
             Analytics.activityLogged(kind: kind.rawValue, source: source)
-            Self.didLogActivity?()
+            Self.didLogActivity?(entity)
         }
         return entity
     }

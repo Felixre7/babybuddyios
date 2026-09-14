@@ -78,6 +78,7 @@ struct DayTimelineView: View {
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
         .background(BBColor.surface)
+        .overlay(alignment: .bottom) { UndoToastView().padding(.bottom, 12) }
         // Leave room so the last row can scroll clear of the floating add button.
         .contentMargins(.bottom, 88, for: .scrollContent)
         .navigationTitle(title)
