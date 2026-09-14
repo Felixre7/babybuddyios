@@ -111,7 +111,7 @@ struct SettingsView: View {
                             .padding(.horizontal, 4)
                             .padding(.top, 2)
                         doseRemindersCard
-                        Text("Get a notification when a medication logged with a next-dose interval can be given again.")
+                        Text("Get a notification when a medication logged with a next-dose interval can be given again. Each phone schedules its own from synced doses, so pull to refresh before giving a dose in case someone else just logged one.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .padding(.horizontal, 4)
