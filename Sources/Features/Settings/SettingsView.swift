@@ -36,6 +36,7 @@ struct SettingsView: View {
     // The support-nudge switch. App-only defaults, not the App Group — nudges are an app-process
     // concern; the key comes from ``SupportNudgeStore`` so the two can't drift apart.
     @AppStorage(SupportNudgeStore.remindersEnabledKey) private var supportRemindersEnabled = true
+    @AppStorage(UndoToastCenter.enabledKey) private var undoToastEnabled = true
 
     @State private var debugConflict: ConflictRecord?
     @State private var debugIcons = false
@@ -455,6 +456,17 @@ struct SettingsView: View {
                         ForEach(FeedingMethod.allCases) { Text($0.label).tag($0) }
                     }
                 } label: { menuValue(quickFeedMethod.label) }
+            }
+            rowDivider
+            SettingsRow(symbol: "arrow.uturn.backward", tint: BBColor.brand, title: "Undo after logging") {
+                Toggle("", isOn: Binding(
+                    get: { undoToastEnabled },
+                    set: { newValue in
+                        undoToastEnabled = newValue
+                        Analytics.settingChanged("undoToast", enabled: newValue)
+                    }))
+                    .labelsHidden()
+                    .tint(BBColor.primary)
             }
         }
     }

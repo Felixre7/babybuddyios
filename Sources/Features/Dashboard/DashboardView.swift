@@ -117,6 +117,9 @@ struct DashboardView: View {
             .navigationDestination(for: EntityKind.self) { kind in
                 DayTimelineView(kind: kind, childID: selectedChildID)
             }
+            .overlay(alignment: .bottom) {
+                UndoToastView().padding(.bottom, 84) // clear of the floating add button
+            }
             .overlay {
                 if !children.isEmpty {
                     QuickAddMenu(
