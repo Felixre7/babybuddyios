@@ -29,6 +29,8 @@ struct SettingsView: View {
     @AppStorage("selectedChildID", store: SharedDefaults.suite) private var selectedChildID = 0
     // Mirrors SharedDefaults.liveActivitiesEnabled; keep the key and default in sync.
     @AppStorage("liveActivitiesEnabled", store: SharedDefaults.suite) private var liveActivitiesEnabled = true
+    @AppStorage(SharedDefaults.stalenessThresholdKey, store: SharedDefaults.suite)
+    private var stalenessThresholdMinutes = SyncFreshness.defaultThresholdMinutes
     // Mirror SharedDefaults.quickFeedType/Method — the Quick Log widget's one-tap Feeding
     // defaults, read by the widget's intent. Keep the keys and defaults in sync.
     @AppStorage("quickFeedType", store: SharedDefaults.suite) private var quickFeedType: FeedingType = .breastMilk
@@ -284,6 +286,17 @@ struct SettingsView: View {
             rowDivider
 
             conflictRow
+            rowDivider
+            SettingsRow(symbol: "clock.arrow.circlepath", tint: BBColor.warning,
+                        title: "Stale after") {
+                Menu {
+                    Picker("Stale after", selection: $stalenessThresholdMinutes) {
+                        ForEach(SyncFreshness.thresholdOptions, id: \.self) {
+                            Text(SyncFreshness.thresholdLabel($0)).tag($0)
+                        }
+                    }
+                } label: { menuValue(SyncFreshness.thresholdLabel(stalenessThresholdMinutes)) }
+            }
         }
     }
 

@@ -23,16 +23,17 @@ struct StatusWidget: Widget {
 struct StatusEntry: TimelineEntry {
     let date: Date
     let status: ChildStatus
+    var lastSync: Date? = SharedDefaults.lastSyncDate
 }
 
 struct StatusProvider: TimelineProvider {
     func placeholder(in context: Context) -> StatusEntry {
-        StatusEntry(date: .now, status: .sample)
+        StatusEntry(date: .now, status: .sample, lastSync: .now.addingTimeInterval(-4 * 60))
     }
 
     func getSnapshot(in context: Context, completion: @escaping (StatusEntry) -> Void) {
-        let status = context.isPreview ? .sample : Self.currentStatus()
-        completion(StatusEntry(date: .now, status: status))
+        completion(context.isPreview ? placeholder(in: context)
+                                     : StatusEntry(date: .now, status: Self.currentStatus()))
     }
 
     func getTimeline(in context: Context, completion: @escaping (Timeline<StatusEntry>) -> Void) {
@@ -105,6 +106,7 @@ struct StatusWidgetView: View {
                 VStack(spacing: 9) {
                     ForEach(status.all, id: \.kind) { smallRow($0) }
                 }
+                freshnessStamp
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
             .widgetURL(homeURL)
@@ -166,6 +168,7 @@ struct StatusWidgetView: View {
                     }
                 }
                 .frame(maxHeight: .infinity)   // tiles flex to fill the height below the header
+                freshnessStamp
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             .widgetURL(homeURL)
@@ -224,6 +227,17 @@ struct StatusWidgetView: View {
     }
 
     // MARK: Shared pieces
+
+    /// "Updated 4m ago", warning-coloured past the Settings threshold. Evaluated at entry time —
+    /// the provider refreshes every ~30 min, which is the granularity the threshold needs.
+    private var freshnessStamp: some View {
+        let stale = SyncFreshness.isStale(lastSync: entry.lastSync, now: entry.date,
+                                          thresholdMinutes: SharedDefaults.stalenessThresholdMinutes)
+        return Text(SyncFreshness.label(lastSync: entry.lastSync, now: entry.date))
+            .font(.system(size: 9, weight: .medium))
+            .foregroundStyle(stale ? BBColor.warning : .secondary)
+            .lineLimit(1)
+    }
 
     /// Short tile caption per kind ("Feeding", "Sleep", "Diaper").
     private func tileLabel(_ kind: EntityKind) -> String {
