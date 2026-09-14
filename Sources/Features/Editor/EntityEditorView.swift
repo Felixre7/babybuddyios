@@ -19,15 +19,20 @@ struct EntityEditorView: View {
     /// Set when this editor is converting a running timer into an activity. Pre-fills
     /// start = timer.start, end = now, and routes Save through ``LocalRepository/convertTimer``.
     let sourceTimer: LocalEntity?
+    /// Set when logging the next dose from a medication reminder: a new record pre-filled from this
+    /// one, timed now.
+    let template: LocalEntity?
 
     /// The record kind. Mirrored into state so the top activity selector can swap it while
     /// creating; locked to the passed-in value when editing or converting.
     @State private var kind: EntityKind
 
-    init(kind: EntityKind, childID: Int, entity: LocalEntity? = nil, sourceTimer: LocalEntity? = nil) {
+    init(kind: EntityKind, childID: Int, entity: LocalEntity? = nil, sourceTimer: LocalEntity? = nil,
+         template: LocalEntity? = nil) {
         self.childID = childID
         self.entity = entity
         self.sourceTimer = sourceTimer
+        self.template = template
         _kind = State(initialValue: kind)
     }
 
@@ -65,6 +70,12 @@ struct EntityEditorView: View {
     @State private var medName = ""
     @State private var dosage = ""
     @State private var dosageUnit = "mg"
+    @State private var doseInterval: DoseInterval = .none
+    @State private var customDoseHours = ""
+    @State private var customDoseMinutes = ""
+
+    /// Every cached dose, so a dose synced in while the editor is open still raises the warning.
+    @Query(filter: #Predicate<LocalEntity> { $0.kindRaw == "medication" }) private var medications: [LocalEntity]
 
     @State private var confirmingDelete = false
     /// The queued write for this record that the server refused, if any. Drives the sync banner.
@@ -178,6 +189,7 @@ struct EntityEditorView: View {
         sectioned(detailsTitle) { detailsCard }
         sectioned("Tags") { tagsCard }
         if showsNotes { sectioned("Notes") { notesCard } }
+        doseWarning
         validationNotice
         actionButtons.padding(.top, 4)
     }
@@ -364,6 +376,16 @@ struct EntityEditorView: View {
                     HStack(spacing: 10) {
                         numericField(text: $dosage, unit: nil)
                         plainField("Unit", text: $dosageUnit).frame(width: 92)
+                    }
+                }
+                fieldLabeled("Next dose after") {
+                    menuField(options: [.none] + MedicationReminderPolicy.choices.map(DoseInterval.preset) + [.custom],
+                              selection: $doseInterval) { $0.label }
+                    if doseInterval == .custom {
+                        HStack(spacing: 10) {
+                            numericField(text: $customDoseHours, unit: "h")
+                            numericField(text: $customDoseMinutes, unit: "m")
+                        }
                     }
                 }
             }
@@ -577,22 +599,38 @@ struct EntityEditorView: View {
     /// wrong yet, the entry just isn't something the server will take.
     @ViewBuilder private var validationNotice: some View {
         if let problem {
-            HStack(alignment: .top, spacing: 9) {
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .font(.system(size: 13))
-                    .foregroundStyle(BBColor.warning)
-                Text(problem.message)
-                    .font(.system(size: 14))
-                    .fixedSize(horizontal: false, vertical: true)
-                Spacer(minLength: 0)
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 11)
-            .background(BBColor.warning.opacity(scheme == .dark ? 0.16 : 0.18),
-                        in: RoundedRectangle(cornerRadius: BBRadius.control, style: .continuous))
-            .accessibilityElement(children: .combine)
-            .accessibilityLabel("Can\u{2019}t save yet. \(problem.message)")
+            warningNotice(problem.message, accessibilityLabel: "Can\u{2019}t save yet. \(problem.message)")
         }
+    }
+
+    /// A new dose of a medication whose next dose isn't OK yet — someone may have just given one
+    /// on another phone. A warning, not a block: Save stays enabled.
+    @ViewBuilder private var doseWarning: some View {
+        if kind == .medication, !isEditing,
+           let wait = MedicationReminderPolicy.doseNotYetOK(named: medName, childID: childID, in: medications) {
+            let given = wait.dose.timestamp.formatted(date: .omitted, time: .shortened)
+            let next = wait.next.formatted(date: .omitted, time: .shortened)
+            let message = "\(medName.trimmingCharacters(in: .whitespaces)) was last given at \(given). Next dose OK at \(next)."
+            warningNotice(message, accessibilityLabel: "Warning. \(message)")
+        }
+    }
+
+    private func warningNotice(_ message: String, accessibilityLabel: String) -> some View {
+        HStack(alignment: .top, spacing: 9) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 13))
+                .foregroundStyle(BBColor.warning)
+            Text(message)
+                .font(.system(size: 14))
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 11)
+        .background(BBColor.warning.opacity(scheme == .dark ? 0.16 : 0.18),
+                    in: RoundedRectangle(cornerRadius: BBRadius.control, style: .continuous))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(accessibilityLabel)
     }
 
     private var measurementLabel: String {
@@ -660,7 +698,10 @@ struct EntityEditorView: View {
             end = Date()
             return
         }
-        guard let p = entity?.payloadObject else { return }
+        // A template (the dose a reminder was about) fills the form like an edit, but stays a new
+        // record timed now: `buildPayload` only carries `entity`'s id.
+        guard let p = (entity ?? template)?.payloadObject else { return }
+        defer { if entity == nil { time = Date() } }
         func parseDate(_ key: String) -> Date? { (p[key] as? String).flatMap(APIDate.parse) }
         start = parseDate("start") ?? start
         end = parseDate("end") ?? end
@@ -681,6 +722,15 @@ struct EntityEditorView: View {
         medName = p["name"] as? String ?? ""
         if let d = p["dosage"] as? Double { dosage = trimmed(d) }
         dosageUnit = p["dosage_unit"] as? String ?? dosageUnit
+        if let raw = p["next_dose_interval"] as? String, let seconds = APIDuration.parse(raw), seconds > 0 {
+            if MedicationReminderPolicy.choices.contains(seconds) {
+                doseInterval = .preset(seconds)
+            } else {
+                doseInterval = .custom
+                customDoseHours = String(Int(seconds) / 3600)
+                customDoseMinutes = String(Int(seconds) % 3600 / 60)
+            }
+        }
         for key in ["weight", "height", "head_circumference", "bmi", "temperature"] {
             if let v = p[key] as? Double { value = trimmed(v) }
         }
@@ -776,6 +826,7 @@ struct EntityEditorView: View {
             p["name"] = medName; p["time"] = iso(time)
             if let d = ActivityDraft.number(dosage) { p["dosage"] = d }
             p["dosage_unit"] = dosageUnit
+            p["next_dose_interval"] = doseIntervalSeconds.map(APIDuration.string(from:)) ?? NSNull()
             p["notes"] = notes; p["tags"] = tagList
         case .timer, .child:
             break
@@ -785,8 +836,33 @@ struct EntityEditorView: View {
         return p
     }
 
+    /// The chosen next-dose interval in seconds; a blank or zero custom entry means none.
+    private var doseIntervalSeconds: TimeInterval? {
+        switch doseInterval {
+        case .none: return nil
+        case .preset(let seconds): return seconds
+        case .custom:
+            let seconds = (ActivityDraft.number(customDoseHours) ?? 0) * 3600
+                + (ActivityDraft.number(customDoseMinutes) ?? 0) * 60
+            return seconds > 0 ? seconds : nil
+        }
+    }
+
     private func trimmed(_ value: Double) -> String {
         value == value.rounded() ? String(Int(value)) : String(value)
+    }
+}
+
+/// A medication's next-dose interval as the editor offers it: none, a preset, or typed in.
+private enum DoseInterval: Hashable {
+    case none, preset(TimeInterval), custom
+
+    var label: String {
+        switch self {
+        case .none: return "None"
+        case .preset(let seconds): return EntityFormatting.formatInterval(seconds)
+        case .custom: return "Custom"
+        }
     }
 }
 

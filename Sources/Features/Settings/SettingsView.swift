@@ -40,6 +40,8 @@ struct SettingsView: View {
     @AppStorage(SupportNudgeStore.remindersEnabledKey) private var supportRemindersEnabled = true
     // Mirrors ForgottenTimerPolicy.isEnabled; keep the key in sync.
     @AppStorage(ForgottenTimerPolicy.enabledKey, store: SharedDefaults.suite) private var timerAlertsEnabled = false
+    // Mirrors MedicationReminderPolicy.isEnabled.
+    @AppStorage(MedicationReminderPolicy.enabledKey, store: SharedDefaults.suite) private var doseRemindersEnabled = false
     @AppStorage(UndoToastCenter.enabledKey) private var undoToastEnabled = true
 
     @State private var debugConflict: ConflictRecord?
@@ -104,6 +106,12 @@ struct SettingsView: View {
                             .padding(.top, 2)
                         timerAlertsCard
                         Text("Get a notification when a timer runs longer than expected, so a forgotten one doesn't file a bogus record.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 4)
+                            .padding(.top, 2)
+                        doseRemindersCard
+                        Text("Get a notification when a medication logged with a next-dose interval can be given again. Each phone schedules its own from synced doses, so pull to refresh before giving a dose in case someone else just logged one.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .padding(.horizontal, 4)
@@ -440,18 +448,7 @@ struct SettingsView: View {
     private var timerAlertsCard: some View {
         card {
             SettingsRow(symbol: "bell.badge", tint: BBColor.restart, title: "Forgotten timer alerts") {
-                Toggle("", isOn: Binding(
-                    get: { timerAlertsEnabled },
-                    set: { newValue in
-                        timerAlertsEnabled = newValue
-                        Analytics.settingChanged("forgottenTimerAlerts", enabled: newValue)
-                        Task {
-                            if newValue { _ = await ForgottenTimerAlerts.shared.requestAuthorization() }
-                            await ForgottenTimerAlerts.shared.reconcile()
-                        }
-                    }))
-                    .labelsHidden()
-                    .tint(BBColor.primary)
+                alertToggle($timerAlertsEnabled, setting: "forgottenTimerAlerts")
             }
             if timerAlertsEnabled {
                 ForEach(TimerActivity.allCases, id: \.self) { activity in
@@ -472,12 +469,38 @@ struct SettingsView: View {
         .animation(.default, value: timerAlertsEnabled)
     }
 
+    /// A "next dose OK" notification once a medication's next-dose interval has passed.
+    private var doseRemindersCard: some View {
+        card {
+            SettingsRow(symbol: "pills.fill", tint: BBColor.activity(.medication), title: "Medication reminders") {
+                alertToggle($doseRemindersEnabled, setting: "medicationReminders")
+            }
+        }
+    }
+
+    /// A notifications switch: turning it on asks for permission, and either way the scheduled
+    /// notifications catch up.
+    private func alertToggle(_ isOn: Binding<Bool>, setting: String) -> some View {
+        Toggle("", isOn: Binding(
+            get: { isOn.wrappedValue },
+            set: { newValue in
+                isOn.wrappedValue = newValue
+                Analytics.settingChanged(setting, enabled: newValue)
+                Task {
+                    if newValue { _ = await LocalAlerts.shared.requestAuthorization() }
+                    await LocalAlerts.shared.reconcile()
+                }
+            }))
+            .labelsHidden()
+            .tint(BBColor.primary)
+    }
+
     private func thresholdBinding(_ activity: TimerActivity) -> Binding<TimeInterval> {
         Binding(
             get: { ForgottenTimerPolicy.threshold(for: activity) },
             set: { seconds in
                 SharedDefaults.suite.set(seconds, forKey: ForgottenTimerPolicy.thresholdKey(activity))
-                Task { await ForgottenTimerAlerts.shared.reconcile() }
+                Task { await LocalAlerts.shared.reconcile() }
             })
     }
 

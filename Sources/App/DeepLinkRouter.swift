@@ -23,6 +23,10 @@ final class DeepLinkRouter {
     /// handled.
     var openDayKind: EntityKind?
 
+    /// Set when a medication reminder is tapped: the dose whose next dose is now OK, to log the
+    /// next one from. Cleared once handled.
+    var repeatDoseLocalID: UUID?
+
     /// Set when a link asks to present the supporter screen; cleared once handled. Nothing in the
     /// app emits `babybuddy://supporter` today, but the route stays live so an existing link still
     /// lands somewhere sensible.
@@ -44,6 +48,9 @@ final class DeepLinkRouter {
             return true
         case "day": // babybuddy://day/<kindRaw> — open that kind's day timeline
             if let raw = parts.first, let kind = EntityKind(rawValue: raw) { openDayKind = kind }
+            return true
+        case "dose": // babybuddy://dose/<localID> — log the next dose of that medication
+            if let id = parts.first.flatMap(UUID.init(uuidString:)) { repeatDoseLocalID = id }
             return true
         case "supporter": // babybuddy://supporter — present the supporter screen
             showSupporter = true

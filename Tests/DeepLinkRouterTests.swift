@@ -39,6 +39,14 @@ final class DeepLinkRouterTests: XCTestCase {
         XCTAssertNil(router.openDayKind)
     }
 
+    /// A tapped medication reminder links `babybuddy://dose/<localID>` to log the next dose.
+    func testDoseLinkParsesLocalID() {
+        let router = DeepLinkRouter()
+        let id = UUID()
+        XCTAssertTrue(router.handle(URL(string: "babybuddy://dose/\(id.uuidString)")!))
+        XCTAssertEqual(router.repeatDoseLocalID, id)
+    }
+
     func testForeignSchemeIsRejected() {
         let router = DeepLinkRouter()
         XCTAssertFalse(router.handle(URL(string: "https://example.com")!))

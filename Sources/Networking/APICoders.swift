@@ -63,3 +63,22 @@ enum APIDate {
         return nil
     }
 }
+
+/// Django `DurationField` strings, as Django REST Framework writes them: `HH:MM:SS[.ffffff]` with a
+/// `"D "` day prefix past 24 hours (`"04:00:00"`, `"1 00:00:00"`). Used for `next_dose_interval`.
+enum APIDuration {
+    static func parse(_ raw: String) -> TimeInterval? {
+        let dayParts = raw.split(separator: " ")
+        guard dayParts.count <= 2 else { return nil }
+        let days = dayParts.count == 2 ? Double(dayParts[0]) : 0
+        let clock = dayParts.last?.split(separator: ":").map { Double($0) } ?? []
+        guard let days, clock.count == 3, let h = clock[0], let m = clock[1], let s = clock[2] else { return nil }
+        return days * 86_400 + h * 3600 + m * 60 + s
+    }
+
+    static func string(from seconds: TimeInterval) -> String {
+        let total = Int(seconds.rounded())
+        let clock = String(format: "%02d:%02d:%02d", total % 86_400 / 3600, total % 3600 / 60, total % 60)
+        return total >= 86_400 ? "\(total / 86_400) \(clock)" : clock
+    }
+}

@@ -24,6 +24,8 @@ struct DashboardView: View {
     @State private var navPath: [EntityKind] = []
     @State private var addKind: EntityKind?
     @State private var editing: LocalEntity?
+    /// A dose whose reminder was tapped: the editor opens a new dose pre-filled from it.
+    @State private var repeatingDose: LocalEntity?
     @State private var startingTimer = false
     @State private var quickAddOpen = false
     @State private var showAllActivities = false
@@ -100,6 +102,9 @@ struct DashboardView: View {
                         }
                     }
 
+                    let doses = waitingDoses
+                    if !doses.isEmpty { nextDoseSection(doses) }
+
                     if inlineNudge == .banner, !nudgesSilenced {
                         SupportBanner(
                             onSupport: { acceptNudge(.banner) },
@@ -143,6 +148,9 @@ struct DashboardView: View {
             .sheet(item: $editing) { entity in
                 EntityEditorView(kind: entity.kind, childID: selectedChildID, entity: entity)
             }
+            .sheet(item: $repeatingDose) { dose in
+                EntityEditorView(kind: .medication, childID: dose.childID ?? selectedChildID, template: dose)
+            }
             .sheet(isPresented: $startingTimer) {
                 StartTimerSheet(childID: selectedChildID)
             }
@@ -170,11 +178,13 @@ struct DashboardView: View {
             .onChange(of: router.openTimerLocalID) { _, id in openTimerActions(id) }
             .onChange(of: router.convertTarget) { _, target in openConvert(target) }
             .onChange(of: router.openDayKind) { _, kind in openDay(kind) }
+            .onChange(of: router.repeatDoseLocalID) { _, id in openRepeatDose(id) }
             .onAppear {
                 // handle a deep link that arrived before this view existed
                 openTimerActions(router.openTimerLocalID)
                 openConvert(router.convertTarget)
                 openDay(router.openDayKind)
+                openRepeatDose(router.repeatDoseLocalID)
                 #if DEBUG
                 if let raw = ProcessInfo.processInfo.environment["BB_OPEN"], !children.isEmpty {
                     if raw == "timer", !startingTimer {
@@ -459,6 +469,50 @@ struct DashboardView: View {
             .buttonStyle(.plain)
     }
 
+    // MARK: Next dose
+
+    /// Medications whose next dose isn't OK yet, each with a countdown. The timeline redraws at
+    /// each dose's time, so a row leaves as soon as its dose is OK. (Its `context.date` is the
+    /// schedule entry, which for an explicit schedule starts at the first dose — hence `.now`.)
+    private func nextDoseSection(_ doses: [(dose: LocalEntity, next: Date)]) -> some View {
+        SwiftUI.TimelineView(.explicit(doses.map(\.next))) { _ in
+            let now = Date.now
+            let waiting = doses.filter { $0.next > now }
+            if !waiting.isEmpty {
+                VStack(alignment: .leading, spacing: 9) {
+                    SectionHeader("Next dose")
+                    VStack(spacing: 9) {
+                        ForEach(waiting, id: \.dose.localID) { wait in
+                            Button { editing = wait.dose } label: {
+                                nextDoseRow(wait.dose, next: wait.next, now: now)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func nextDoseRow(_ dose: LocalEntity, next: Date, now: Date) -> some View {
+        let name = dose.payloadObject["name"] as? String ?? "Medication"
+        let time = next.formatted(date: .omitted, time: .shortened)
+        return BBCard(cornerRadius: BBRadius.row, padding: 13) {
+            HStack(spacing: 12) {
+                ActivityTile(kind: .medication, size: 40, glyph: 21)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(name).font(.subheadline.weight(.semibold))
+                    Text("Next dose OK at \(time)").font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 8)
+                Text(timerInterval: now...next, countsDown: true)
+                    .font(.subheadline.weight(.semibold)).monospacedDigit()
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(name), next dose OK at \(time)")
+    }
+
     // MARK: Latest
 
     private var latestSection: some View {
@@ -480,6 +534,16 @@ struct DashboardView: View {
         else { return }
         stoppingTimer = timer
         router.openTimerLocalID = nil
+    }
+
+    /// Open a new dose pre-filled from the one a tapped medication reminder was about. Looked up in
+    /// the store, not the selected child's query, since the dose may be a sibling's.
+    private func openRepeatDose(_ id: UUID?) {
+        guard let id else { return }
+        router.repeatDoseLocalID = nil
+        if let dose = LocalStore.fetch(localID: id, in: context), dose.kind == .medication {
+            repeatingDose = dose
+        }
     }
 
     /// Open the pre-filled convert editor for a timer arriving via deep link — the widget Stop
@@ -560,6 +624,14 @@ struct DashboardView: View {
 
     private var latestEvents: [LocalEntity] {
         recentKinds.compactMap { lastEvent(of: $0) }.sorted { $0.timestamp > $1.timestamp }
+    }
+
+    /// The newest dose of each medication whose next dose is still ahead, soonest first.
+    private var waitingDoses: [(dose: LocalEntity, next: Date)] {
+        MedicationReminderPolicy.latestDoses(childEntities)
+            .compactMap { dose in MedicationReminderPolicy.nextDose(after: dose).map { (dose, $0) } }
+            .filter { $0.next > .now }
+            .sorted { $0.next < $1.next }
     }
 
     private var activeTimers: [LocalEntity] {
