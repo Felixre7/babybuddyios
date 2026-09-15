@@ -2,11 +2,34 @@
 import Foundation
 import SwiftData
 import UIKit
+import UserNotifications
 
 /// Seeds the local cache with sample records so the authenticated UI can be exercised in
 /// the simulator without a live Baby Buddy server. Activated by launching with the
 /// environment variable `BB_DEMO=1`.
 enum DemoData {
+    /// `BB_UITEST=1`: start a UI-test launch from a clean install, so no test inherits another's
+    /// records, settings, nudge counters, sign-in or pending notifications. The store and the
+    /// defaults otherwise persist across launches on the simulator, and demo data is only seeded
+    /// into an empty store. With `BB_DEMO=1` the sample data goes in straight away — the demo pull
+    /// seeds too, but only after the first frame, too late for `BB_OPEN`'s `onAppear`.
+    ///
+    /// Called first thing in `BabyBuddyApp.init`, before anything reads defaults or the store.
+    @MainActor
+    static func resetForUITests(_ context: ModelContext) {
+        let environment = ProcessInfo.processInfo.environment
+        guard environment["BB_UITEST"] == "1" else { return }
+        if let domain = Bundle.main.bundleIdentifier {
+            UserDefaults.standard.removePersistentDomain(forName: domain)
+        }
+        SharedDefaults.suite.removePersistentDomain(forName: LocalStore.appGroupID)
+        LocalStore.wipe(in: context)
+        KeychainStore.clear()
+        UNUserNotificationCenter.current().removeAllPendingNotificationRequests()
+        UNUserNotificationCenter.current().removeAllDeliveredNotifications()
+        if environment["BB_DEMO"] == "1" { seedIfNeeded(into: context) }
+    }
+
     static func seedIfNeeded(into context: ModelContext) {
         let existing = (try? context.fetch(FetchDescriptor<LocalEntity>()))?.isEmpty ?? true
         guard existing else { return }

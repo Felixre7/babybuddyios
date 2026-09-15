@@ -23,7 +23,27 @@ An offline-first iOS client for a self-hosted [Baby Buddy](https://github.com/ba
 - CI runs `xcodegen generate` then `xcodebuild ... test CODE_SIGNING_ALLOWED=NO` against the
   newest available iPhone simulator. The scheme builds the widget as a dependency, so an
   app-only import added to `Sources/Shared` or `Sources/Persistence` fails there.
+- Then, if the unit tests pass, the UI tests (`scripts/ui-test.sh`, below) with one retry per
+  test. A failed run uploads `UITests.xcresult`, with a screenshot of each failure.
+- Both run unsigned on purpose: without the App Group the store and the keychain fall back to
+  app-only locations, which is all the app itself needs. Only Home Screen widgets need signing.
 - Docs-only PRs (`*.md`, `Docs/`) skip the macOS job. Any other path builds.
+
+## UI tests
+
+- **Every user-visible change adds or updates a UI test** in `UITests/`, or its PR says why not
+  (a widget, a purchase, the camera, nothing visible). Home Screen widgets aren't UI-tested — driving
+  SpringBoard is too brittle — so their logic lives in unit tests.
+- Run them with `scripts/ui-test.sh` — the same command CI runs, on its own simulator ("BabyBuddy
+  UI Tests"), erased first. Extra `xcodebuild` arguments pass through, e.g.
+  `-only-testing:BabyBuddyUITests/DialogTests`. They have their own scheme, `BabyBuddyUITests`, so
+  `xcodebuild test` on `BabyBuddy` stays unit-only.
+- Tests subclass `UITestCase` and `launch()` a clean install: `BB_UITEST=1` wipes the store, both
+  defaults domains, the keychain and pending notifications before anything reads them, and
+  `BB_DEMO=1` seeds. Pass other `BB_*` hooks to `launch`.
+- Query by what VoiceOver reads; add an `accessibilityIdentifier` only for a label that repeats.
+  Demo data is relative to launch time: compare before and after, never a clock time or a "Today"
+  total. Reach editors through "+" ▸ More… — the quick-add rows are due to log in one tap (#78).
 
 ## UI
 

@@ -152,6 +152,20 @@ targets:
         # Match the host app so the test bundle runs on the same destinations.
         TARGETED_DEVICE_FAMILY: "1"
 
+  # XCUITest: drives the built app from a separate runner process, launching it with `BB_UITEST=1`
+  # (a clean install every time) — see UITests/UITestCase.swift and CLAUDE.md ▸ UI tests.
+  BabyBuddyUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: UITests
+    dependencies:
+      - target: BabyBuddy
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.kurtisguy.BabyBuddy.uitests
+        TARGETED_DEVICE_FAMILY: "1"
+
 schemes:
   BabyBuddy:
     build:
@@ -165,3 +179,13 @@ schemes:
     test:
       targets:
         - BabyBuddyTests
+  # Its own scheme keeps UI launches out of the unit result bundle and out of everyday
+  # `xcodebuild test` loops; scripts/ui-test.sh runs it, locally and in CI.
+  BabyBuddyUITests:
+    build:
+      targets:
+        BabyBuddy: all
+        BabyBuddyUITests: [test]
+    test:
+      targets:
+        - BabyBuddyUITests

@@ -10,6 +10,10 @@ empty and add the `internal` label if a tester would notice nothing.>
 
 -
 
+## UI tests
+
+- [ ] Added or updated a UI test for this change — or why not (widget, purchase, camera, nothing visible):
+
 ## Manual on-device checklist
 
 - [ ]

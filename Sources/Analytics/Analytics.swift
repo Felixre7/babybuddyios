@@ -31,11 +31,13 @@ enum Analytics {
     private(set) static var isEnabled = false
 
     /// Initializes TelemetryDeck if an App ID is configured and we're not in
-    /// demo mode. Safe to call once at launch; a no-op otherwise.
+    /// demo mode or a UI test. Safe to call once at launch; a no-op otherwise.
     static func start() {
         guard !isEnabled else { return }
-        // Demo mode runs offline with seeded data — never report it.
-        guard ProcessInfo.processInfo.environment["BB_DEMO"] != "1" else { return }
+        // Demo mode runs offline with seeded data, and UI tests (`BB_UITEST`) drive the app from a
+        // script — never report either.
+        let environment = ProcessInfo.processInfo.environment
+        guard environment["BB_DEMO"] != "1", environment["BB_UITEST"] != "1" else { return }
         guard let appID else { return }
 
         let config = TelemetryDeck.Config(appID: appID, salt: salt)

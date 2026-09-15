@@ -202,13 +202,15 @@ final class PurchaseManager {
 
     // MARK: - Configuration
 
-    /// Configures RevenueCat if a key is present and we're not in demo mode, then begins observing
-    /// customer changes and fetches the initial state. Safe to call once at launch; a no-op
-    /// otherwise (no key, already configured, or demo mode).
+    /// Configures RevenueCat if a key is present and we're not in demo mode or a UI test, then begins
+    /// observing customer changes and fetches the initial state. Safe to call once at launch; a no-op
+    /// otherwise (no key, already configured, demo mode, or `BB_UITEST`).
     func start() {
         guard !isConfigured else { return }
-        // Demo mode runs offline with seeded data — never reach the purchase backend.
-        guard ProcessInfo.processInfo.environment["BB_DEMO"] != "1" else { return }
+        // Demo mode runs offline with seeded data, and UI tests drive the app from a script — never
+        // reach the purchase backend from either.
+        let environment = ProcessInfo.processInfo.environment
+        guard environment["BB_DEMO"] != "1", environment["BB_UITEST"] != "1" else { return }
         #if canImport(RevenueCat)
         guard let key = Self.apiKey else { return }
         Purchases.configure(withAPIKey: key)
