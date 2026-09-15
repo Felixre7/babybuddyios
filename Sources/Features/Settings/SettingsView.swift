@@ -409,7 +409,7 @@ struct SettingsView: View {
     private var securityCard: some View {
         card {
             SettingsRow(symbol: "faceid", tint: BBColor.sleep, title: "Require Face ID") {
-                Toggle("", isOn: Binding(
+                Toggle("Require Face ID", isOn: Binding(
                     get: { lock.isEnabled },
                     set: { newValue in
                         lock.isEnabled = newValue
@@ -430,7 +430,7 @@ struct SettingsView: View {
     private var notificationsCard: some View {
         card {
             SettingsRow(symbol: "clock.badge", tint: BBColor.info, title: "Live Activity") {
-                Toggle("", isOn: Binding(
+                Toggle("Live Activity", isOn: Binding(
                     get: { liveActivitiesEnabled },
                     set: { newValue in
                         liveActivitiesEnabled = newValue
@@ -448,7 +448,7 @@ struct SettingsView: View {
     private var timerAlertsCard: some View {
         card {
             SettingsRow(symbol: "bell.badge", tint: BBColor.restart, title: "Forgotten timer alerts") {
-                alertToggle($timerAlertsEnabled, setting: "forgottenTimerAlerts")
+                alertToggle("Forgotten timer alerts", $timerAlertsEnabled, setting: "forgottenTimerAlerts")
             }
             if timerAlertsEnabled {
                 ForEach(TimerActivity.allCases, id: \.self) { activity in
@@ -473,15 +473,15 @@ struct SettingsView: View {
     private var doseRemindersCard: some View {
         card {
             SettingsRow(symbol: "pills.fill", tint: BBColor.activity(.medication), title: "Medication reminders") {
-                alertToggle($doseRemindersEnabled, setting: "medicationReminders")
+                alertToggle("Medication reminders", $doseRemindersEnabled, setting: "medicationReminders")
             }
         }
     }
 
     /// A notifications switch: turning it on asks for permission, and either way the scheduled
-    /// notifications catch up.
-    private func alertToggle(_ isOn: Binding<Bool>, setting: String) -> some View {
-        Toggle("", isOn: Binding(
+    /// notifications catch up. `title` repeats the row's so VoiceOver names the switch itself.
+    private func alertToggle(_ title: String, _ isOn: Binding<Bool>, setting: String) -> some View {
+        Toggle(title, isOn: Binding(
             get: { isOn.wrappedValue },
             set: { newValue in
                 isOn.wrappedValue = newValue
@@ -550,7 +550,7 @@ struct SettingsView: View {
             }
             rowDivider
             SettingsRow(symbol: "arrow.uturn.backward", tint: BBColor.brand, title: "Undo after logging") {
-                Toggle("", isOn: Binding(
+                Toggle("Undo after logging", isOn: Binding(
                     get: { undoToastEnabled },
                     set: { newValue in
                         undoToastEnabled = newValue
@@ -609,7 +609,7 @@ struct SettingsView: View {
         if !purchases.isSupporter, hasSeenNudge {
             rowDivider
             SettingsRow(symbol: "sparkles", tint: BBColor.pumping, title: "Support reminders") {
-                Toggle("", isOn: Binding(
+                Toggle("Support reminders", isOn: Binding(
                     get: { supportRemindersEnabled },
                     set: { newValue in
                         supportRemindersEnabled = newValue

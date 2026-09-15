@@ -34,6 +34,11 @@ struct BabyBuddyApp: App {
     }
 
     init() {
+        let container = LocalStore.makeContainer()
+        #if DEBUG
+        // `BB_UITEST`: wipe to a clean install before anything below reads defaults or the store.
+        DemoData.resetForUITests(container.mainContext)
+        #endif
         Analytics.start()
         if !Self.isHostingTests {
             // Stamped before any Dashboard can ask whether a support nudge is due — every time-based
@@ -46,7 +51,6 @@ struct BabyBuddyApp: App {
                 if UndoToastCenter.isEnabled { UndoToastCenter.shared.show(entity) }
             }
         }
-        let container = LocalStore.makeContainer()
         let router = DeepLinkRouter()
         _router = State(initialValue: router)
         timerAlerts = TimerAlertDelegate(router: router)

@@ -57,6 +57,9 @@ struct SignOutDialog: View {
             }
         }
         .shadow(color: .black.opacity(scheme == .dark ? 0.5 : 0.18), radius: 24, y: 12)
+        // `.contain` first: a label on a plain container is stamped onto every child, which read
+        // both buttons to VoiceOver as "Sign out of <host>?" — Cancel indistinguishable from Sign out.
+        .accessibilityElement(children: .contain)
         .accessibilityAddTraits(.isModal)
         .accessibilityLabel("Sign out of \(host)?")
     }

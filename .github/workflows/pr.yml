@@ -44,9 +44,18 @@ jobs:
     # runners. If the Mac is asleep the job queues; the timeout stops a forgotten
     # run from hanging forever.
     runs-on: [self-hosted, macOS]
-    timeout-minutes: 30
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
+      # On iOS 26 SwiftUI shows a confirmationDialog as a popover and UIKit drops its
+      # cancel action — a destructive prompt with no way back shipped three times
+      # (#89, #90, #119). `git grep`, not grep: the Mac's grep is ugrep.
+      - name: No confirmationDialog
+        run: |
+          if git grep -n '\.confirmationDialog(' -- Sources Widgets; then
+            echo "::error::confirmationDialog loses its Cancel on iOS 26 — use .alert or a design-system dialog (CLAUDE.md ▸ UI)"
+            exit 1
+          fi
       - name: Install XcodeGen
         run: command -v xcodegen >/dev/null || brew install xcodegen
       # BabyBuddy.xcodeproj is gitignored — the project is generated from project.yml.
@@ -92,6 +101,7 @@ jobs:
       # compile into the widget target too. The runner's workspace is outside
       # ~/Documents, so the iCloud xattr/codesigning trap doesn't apply here.
       - name: Build and test
+        id: unit
         run: |
           rm -rf build/Tests.xcresult   # the runner reuses its workspace
           xcodebuild -project BabyBuddy.xcodeproj -scheme BabyBuddy \
@@ -113,6 +123,26 @@ jobs:
               print("  FAIL {}.{}: {}".format(t.get("targetName"), t.get("testName"), t.get("failureText")))
           sys.exit(0 if d.get("failedTests", 1) == 0 and d.get("totalTestCount", 0) > 0 else 1)
           '
+      # The XCUITest suite, once the unit tests pass, on the same CI device —
+      # scripts/ui-test.sh erases it first and prints its own summary. Iterations
+      # are 2 so a test gets exactly one retry: one absorbs a simulator hiccup; a
+      # test that needs it every run gets fixed, not retried.
+      - name: UI tests
+        id: ui
+        if: ${{ !cancelled() && steps.unit.outcome == 'success' }}
+        run: |
+          UI_TEST_DEVICE=CI-BabyBuddy scripts/ui-test.sh \
+            -clonedSourcePackagesDirPath build/SourcePackages \
+            -retry-tests-on-failure -test-iterations 2
+      - name: Upload the UI test result bundle
+        # Demo data only (the seed and the tests' own records), with a screenshot
+        # of every failure — the runner wipes its workspace on the next run.
+        if: ${{ !cancelled() && steps.ui.outcome == 'failure' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: UITests.xcresult
+          path: build/UITests.xcresult
+          retention-days: 7
 
   attribution:
     name: attribution

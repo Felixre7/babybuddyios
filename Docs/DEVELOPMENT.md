@@ -12,7 +12,15 @@ xcodebuild -project BabyBuddy.xcodeproj -scheme BabyBuddy \
   CODE_SIGNING_ALLOWED=NO build
 ```
 
-Swap `build` for `test` to run the suite.
+Swap `build` for `test` to run the unit tests.
+
+The UI tests (XCUITest, `UITests/`) have their own scheme and a script that runs them on a
+dedicated simulator, erased first — the same command CI runs:
+
+```bash
+scripts/ui-test.sh
+scripts/ui-test.sh -only-testing:BabyBuddyUITests/DialogTests/testSignOutCard
+```
 
 `Sources/Info.plist`, `Sources/BabyBuddy.entitlements` and `Widgets/BabyBuddyWidgets.entitlements`
 are all generated from `project.yml`. Edit the YAML and re-run `xcodegen generate`; hand edits to
@@ -31,9 +39,14 @@ Pass these via `SIMCTL_CHILD_<NAME>` environment variables to `xcrun simctl laun
 | Flag | Effect |
 |------|--------|
 | `BB_DEMO=1` | Seed sample data and skip the network (no server needed) |
-| `BB_SEED_CONFLICT=1` | Also seed a sample sync conflict |
+| `BB_UITEST=1` | Start from a clean install: wipe the store, defaults, keychain and notifications first (seeding at once with `BB_DEMO`); no analytics or purchases. Every UI test launches with it |
+| `BB_SEED_CONFLICT=1` | Also seed a sample sync conflict (into an empty store) |
+| `BB_SEED_PENDING=1` | Also seed queued, blocked and photo changes for Pending Changes (into an empty store) |
 | `BB_START_TAB=timeline\|trends\|settings` | Open on a specific tab |
-| `BB_OPEN=feeding\|change\|…` | Auto-present a new-entry editor |
+| `BB_OPEN=timer\|feeding\|change\|…` | Auto-present Start Timer or a new-entry editor |
+| `BB_OPEN_PENDING=1` / `BB_OPEN_CONFLICT=1` | Open Pending Changes / the first conflict from Settings |
+| `BB_SUPPORTER=1` / `BB_SUPPORTER_SHEET=1` | Force supporter status on / open the supporter sheet from Settings |
+| `BB_SCANNER_PREVIEW=1` | Open the QR scanner over a black backdrop, without the camera |
 | `BB_LOAD_OLDER=<n>` | Auto-page the timeline back `n` history chunks on launch (with `BB_DEMO`) |
 | `BB_LOCK=1` | Force the Face ID lock on |
 | `BB_NUDGE=gentle\|milestone\|banner` | Force a support-nudge surface on the Dashboard |
