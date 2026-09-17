@@ -45,6 +45,10 @@ jobs:
     # run from hanging forever.
     runs-on: [self-hosted, macOS]
     timeout-minutes: 60
+    env:
+      # A fork's PR gets no secrets, and `secrets` can't be read from a step's `if` — so the server
+      # lane's condition rides on this instead, and skips there rather than failing the job.
+      HAS_DEMO_SERVER: ${{ secrets.BB_E2E_TOKEN != '' }}
     steps:
       - uses: actions/checkout@v4
       # On iOS 26 SwiftUI shows a confirmationDialog as a popover and UIKit drops its
@@ -143,6 +147,23 @@ jobs:
           name: UITests.xcresult
           path: build/UITests.xcresult
           retention-days: 7
+      # The demo server lane: a real sign-in, push, pull, conflict and rejection against the Baby
+      # Buddy server App Review also uses. Its own cap, so a hang in the network fails this step
+      # rather than eating the job's hour. The tests skip themselves if the server is unreachable,
+      # and the summary raises a warning when they do.
+      #
+      # Its result bundle is deliberately NOT uploaded: this repository is public, and XCUITest
+      # records typed text — including the token the sign-in types.
+      - name: Server UI tests
+        if: ${{ !cancelled() && steps.unit.outcome == 'success' && env.HAS_DEMO_SERVER == 'true' }}
+        timeout-minutes: 25
+        env:
+          BB_E2E_SERVER_URL: ${{ secrets.BB_E2E_SERVER_URL }}
+          BB_E2E_TOKEN: ${{ secrets.BB_E2E_TOKEN }}
+        run: |
+          UI_TEST_DEVICE=CI-BabyBuddy scripts/ui-test.sh --server \
+            -clonedSourcePackagesDirPath build/SourcePackages \
+            -retry-tests-on-failure -test-iterations 2
 
   attribution:
     name: attribution

@@ -115,7 +115,11 @@ final class AppSession {
             // mistyped token all end here, and `Onboarding.completed` only ever fires on the
             // happy path. Without this the funnel has no denominator.
             Analytics.report(error, context: "signIn")
-            lastError = error.userMessage
+            // A server that refuses the token here says 401 or 403 depending on how it's configured
+            // (Django REST answers 403 when it sends no authentication challenge). Both mean the
+            // same thing to someone signing in — the token — so don't send them off to look at
+            // permissions for a mistyped one.
+            lastError = error.isForbidden ? APIError.unauthorized.userMessage : error.userMessage
             return false
         } catch {
             Analytics.error(network: "signIn-unknown")

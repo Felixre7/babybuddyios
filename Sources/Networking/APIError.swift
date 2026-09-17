@@ -114,6 +114,15 @@ enum APIError: Error, Equatable {
         return false
     }
 
+    /// The server wouldn't accept these credentials — 401, or the 403 Django REST answers with when
+    /// it sends no authentication challenge. Sign-in treats them alike; both are the token.
+    var isForbidden: Bool {
+        switch self {
+        case .unauthorized, .forbidden: return true
+        default: return false
+        }
+    }
+
     var userMessage: String {
         switch self {
         case .offline(.dns): return "Couldn't find that server address."

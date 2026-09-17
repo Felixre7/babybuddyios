@@ -71,6 +71,15 @@ class UITestCase: XCTestCase {
         expect(element, timeout: timeout, file: file, line: line).tap()
     }
 
+    /// Replaces a field's contents. Typing into a filled field inserts — or replaces a word —
+    /// wherever the tap landed, which once turned "ci-E981C1CE" into "edited-E981C1CE".
+    func replaceText(_ element: XCUIElement, with text: String) {
+        tap(element)
+        let current = element.value as? String ?? ""
+        let existing = current == element.placeholderValue ? "" : current
+        element.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: existing.count) + text)
+    }
+
     /// Home ▸ "+" ▸ More… ▸ `kind`. Not the quick-add rows: those log in one tap once #78 lands.
     func openEditor(_ kind: String) {
         tap(app.buttons["Add"])
@@ -97,5 +106,11 @@ extension XCUIElementQuery {
     /// The first match whose label starts with `prefix`.
     func labeled(_ prefix: String) -> XCUIElement {
         matching(NSPredicate(format: "label BEGINSWITH %@", prefix)).firstMatch
+    }
+
+    /// The first match whose *value* contains `text` — how to find a filled text field, which has no
+    /// placeholder left to match on.
+    func withValue(_ text: String) -> XCUIElement {
+        matching(NSPredicate(format: "value CONTAINS %@", text)).firstMatch
     }
 }

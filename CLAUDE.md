@@ -41,6 +41,13 @@ An offline-first iOS client for a self-hosted [Baby Buddy](https://github.com/ba
 - Tests subclass `UITestCase` and `launch()` a clean install: `BB_UITEST=1` wipes the store, both
   defaults domains, the keychain and pending notifications before anything reads them, and
   `BB_DEMO=1` seeds. Pass other `BB_*` hooks to `launch`.
+- `scripts/ui-test.sh --server` is the second lane: `UITests/Server` signs into the demo Baby Buddy
+  server (the one App Review uses) and checks pushes, pulls, conflicts and rejections against its
+  API. CI passes the repo secrets `BB_E2E_SERVER_URL` and `BB_E2E_TOKEN`; locally they come from the
+  login keychain (`security add-generic-password -a "$USER" -s babybuddy-e2e-url -w`, and
+  `…-s babybuddy-e2e-token -w`). Without them the tests skip, so the default lane needs nothing but
+  the simulator. Those tests only ever touch records carrying their own marker, and delete them
+  afterwards; that bundle is never uploaded, because the sign-in types the token.
 - Query by what VoiceOver reads; add an `accessibilityIdentifier` only for a label that repeats.
   Demo data is relative to launch time: compare before and after, never a clock time or a "Today"
   total. Reach editors through "+" ▸ More… — the quick-add rows are due to log in one tap (#78).
