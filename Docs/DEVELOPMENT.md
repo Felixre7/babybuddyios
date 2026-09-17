@@ -22,6 +22,19 @@ scripts/ui-test.sh
 scripts/ui-test.sh -only-testing:BabyBuddyUITests/DialogTests/testSignOutCard
 ```
 
+A second lane signs into a real Baby Buddy server and checks what the app pushes and pulls. It takes
+the server address and an API token from the environment (`BB_E2E_SERVER_URL`, `BB_E2E_TOKEN`) or the
+login keychain, and skips when neither is set:
+
+```bash
+security add-generic-password -a "$USER" -s babybuddy-e2e-url -w    # prompts for the value
+security add-generic-password -a "$USER" -s babybuddy-e2e-token -w
+scripts/ui-test.sh --server
+```
+
+Use a token for a user of your own, on a server whose data you don't mind test records appearing in
+and disappearing from; the tests clean up after themselves but they do write.
+
 `Sources/Info.plist`, `Sources/BabyBuddy.entitlements` and `Widgets/BabyBuddyWidgets.entitlements`
 are all generated from `project.yml`. Edit the YAML and re-run `xcodegen generate`; hand edits to
 the generated files are overwritten.
