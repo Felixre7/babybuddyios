@@ -27,22 +27,25 @@ final class SmokeTests: UITestCase {
         XCTAssertTrue(app.buttons.labeled("Sign out").exists)
     }
 
-    /// The Face ID gate has to swallow everything behind it (#33). Nobody answers the automatic
-    /// biometric prompt, so the lock stays up — which is the state worth testing.
-    ///
-    /// iOS 26 keeps the floating tab bar and the Dashboard behind the lock in the element tree, so
-    /// what's asserted is that taps get nowhere, not that the elements are gone.
-    func testLockSwallowsEveryTap() {
+    /// The Face ID gate has to shut the app away from both hands and VoiceOver (#33). Nobody
+    /// answers the automatic biometric prompt, so the lock stays up — which is the state to test.
+    func testLockIsAModalBarrier() {
         launch(["BB_LOCK": "1"])
-        expect(element(labeled: "Baby Buddy is locked"))
-        XCTAssertTrue(app.buttons["Unlock"].exists)
 
-        app.tabBars.buttons["Timeline"].tap()
-        XCTAssertTrue(app.tabBars.buttons["Home"].isSelected, "A tab tap got through the lock")
+        // The lock has to be an accessibility *container* carrying `.isModal`, which is what keeps
+        // VoiceOver inside it; XCUITest surfaces such a container as an Alert, the same way the
+        // sign-out card reads since #120. Without it the trait lands on nothing and a screen reader
+        // walks straight out into the Dashboard the lock is covering.
+        let barrier = expect(app.alerts.firstMatch)
+        XCTAssertTrue(barrier.staticTexts["Baby Buddy is locked"].exists)
+        XCTAssertTrue(barrier.buttons["Unlock"].exists)
 
-        app.buttons["Stop"].tap() // the seeded timer's card, behind the lock
-        XCTAssertFalse(app.navigationBars["Stop Timer"].waitForExistence(timeout: 3),
-                       "The lock let a tap reach the running timer")
+        // Touches stop at it too. (The tab bar stays in the raw element tree either way — the modal
+        // trait steers VoiceOver's traversal, it doesn't prune the hierarchy — so this taps where
+        // the tab bar sits rather than asking for the button.)
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.94)).tap()
+        XCTAssertFalse(app.navigationBars["Timeline"].waitForExistence(timeout: 3),
+                       "A tap got through the lock")
         expect(element(labeled: "Baby Buddy is locked"))
     }
 
