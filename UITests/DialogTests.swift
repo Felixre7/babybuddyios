@@ -96,6 +96,18 @@ final class DialogTests: UITestCase {
         XCTAssertFalse(connect.isEnabled)
     }
 
+    /// Anyone whose camera is refused — or who simply has the token on a clipboard — needs the way
+    /// back out of the scanner, and it's the same screen App Review saw (#4, #15).
+    /// `BB_SCANNER_PREVIEW` opens it over a black backdrop, so no camera is involved.
+    func testScannerOffersManualEntry() {
+        launch(["BB_SCANNER_PREVIEW": "1"], demo: false)
+        expect(app.staticTexts["Point at the QR code"])
+        expect(app.staticTexts["Scan QR code"])
+        tap(elements("label CONTAINS 'Enter details manually'").firstMatch)
+        expectGone(app.staticTexts["Point at the QR code"])
+        expect(app.textFields["Your server URL or IP address"])
+    }
+
     /// The sign-out card, which its modal trait exposes as an alert. Its buttons are queried inside
     /// it: the Settings row behind the clear cover is also a "Sign out" button, and still in the tree.
     private var signOutCard: XCUIElement {

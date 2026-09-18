@@ -91,16 +91,32 @@ enum ForgottenTimerPolicy {
 /// medication per child counts: a later dose supersedes an earlier one's reminder.
 enum MedicationReminderPolicy {
     static let enabledKey = "medicationRemindersEnabled"
-    static var isEnabled: Bool { SharedDefaults.suite.bool(forKey: enabledKey) }
+    static var isEnabled: Bool {
+        #if DEBUG
+        if ProcessInfo.processInfo.environment["BB_DOSE_ALERT_SECONDS"] != nil { return true }
+        #endif
+        return SharedDefaults.suite.bool(forKey: enabledKey)
+    }
 
     /// The intervals the editor offers before "Custom", in seconds.
     static let choices: [TimeInterval] = [14_400, 21_600, 28_800, 43_200, 86_400]
 
     /// When the dose after this one is OK, or `nil` if it has no interval.
+    ///
+    /// `BB_DOSE_ALERT_SECONDS=<n>` (DEBUG) turns the reminders on and shortens every interval to
+    /// `n` seconds — the counterpart of the `BB_TIMER_ALERT_SECONDS` hook in
+    /// ``ForgottenTimerPolicy/threshold(for:)``, because the shortest interval the editor offers is
+    /// four hours and no test can wait for one.
     static func nextDose(after dose: LocalEntity) -> Date? {
         guard dose.kind == .medication,
               let raw = dose.payloadObject["next_dose_interval"] as? String,
               let interval = APIDuration.parse(raw), interval > 0 else { return nil }
+        #if DEBUG
+        if let seconds = ProcessInfo.processInfo.environment["BB_DOSE_ALERT_SECONDS"],
+           let n = Double(seconds) {
+            return dose.timestamp.addingTimeInterval(n)
+        }
+        #endif
         return dose.timestamp.addingTimeInterval(interval)
     }
 

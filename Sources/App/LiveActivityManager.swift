@@ -31,7 +31,13 @@ final class LiveActivityManager {
         }
 
         let desired = currentRunningTimer()
-        let existing = Activity<RunningTimerAttributes>.activities
+        // An activity we've already ended stays in `activities` for a while afterwards. Counting
+        // one as live would match the running timer and take the update path below, so the timer
+        // would be left with no banner at all — which is what turning the setting off and straight
+        // back on used to do.
+        let existing = Activity<RunningTimerAttributes>.activities.filter {
+            $0.activityState != .ended && $0.activityState != .dismissed
+        }
 
         // End activities that no longer match the running timer (stopped/discarded, or replaced).
         for activity in existing where activity.attributes.timerLocalID != desired?.attributes.timerLocalID {
