@@ -310,6 +310,17 @@ final class SupportNudgeStore {
         defaults.set(defaults.integer(forKey: Key.loggedEntries) + 1, forKey: Key.loggedEntries)
     }
 
+    /// Restart the global cap without reporting a nudge.
+    ///
+    /// For support asks that are not nudges and are not driven by this policy — today only the
+    /// "Support development" button on the What's New card. Without this, an update can show What's
+    /// New and then have the Dashboard put a gentle ask up in the same session, which is two asks
+    /// in a row from someone who has just updated. Nothing is reported, because nothing this store
+    /// decided was shown.
+    func snoozeNudges(now: Date = .now) {
+        defaults.set(now, forKey: Key.lastNudge)
+    }
+
     /// Note that `nudge` reached the screen: restart the cap, retire its milestone, report it.
     func markShown(_ nudge: SupportNudge, now: Date = .now) {
         guard let variant = nudge.variant else { return }

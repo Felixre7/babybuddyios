@@ -415,6 +415,46 @@ extension Analytics {
         signal("Nudge.retired")
     }
 
+    // MARK: What's New
+    //
+    // The release card (see ``WhatsNewView``). Four signals covering the whole of it: it appeared,
+    // and then exactly one of the three ways out. Nothing about the release's contents is carried —
+    // the version is already a TelemetryDeck default parameter on every signal, so repeating it
+    // here would only double it up.
+    //
+    // As with the nudges there is no "converted" signal: tapping through to the tip sheet shows up
+    // as a `Supporter.sheetViewed` / `Tip.*` carrying the matching ``SupporterSource``.
+
+    /// Where a What's New card was opened from.
+    enum WhatsNewSource: String, CaseIterable {
+        /// Shown automatically on the first launch after an update.
+        case launch
+        /// Opened on purpose from Settings.
+        case settings
+    }
+
+    /// The card reached the screen.
+    static func whatsNewShown(source: WhatsNewSource) {
+        signal("WhatsNew.shown", parameters: ["source": source.rawValue])
+    }
+
+    /// Continue (or Done, from Settings) was tapped — the card was read and closed.
+    static func whatsNewContinued(source: WhatsNewSource) {
+        signal("WhatsNew.continued", parameters: ["source": source.rawValue])
+    }
+
+    /// "Support development" was tapped. Whether that became a tip is answered by the
+    /// ``SupporterSource`` on the sheet's own signals, not here.
+    static func whatsNewSupporterTapped(source: WhatsNewSource) {
+        signal("WhatsNew.supporterTapped", parameters: ["source": source.rawValue])
+    }
+
+    /// The card was closed without tapping Continue — swiped away from the Settings sheet. The
+    /// launch card is a full-screen cover with no swipe, so this is rare there by construction.
+    static func whatsNewDismissed(source: WhatsNewSource) {
+        signal("WhatsNew.dismissed", parameters: ["source": source.rawValue])
+    }
+
     /// Why ``APIClient/splitPage(_:allowsUnpaginatedArray:)`` couldn't read a list body, as a closed
     /// vocabulary of category names. Only rejected shapes are listed — the two it accepts are not
     /// reported, because a sync that works is not an error.

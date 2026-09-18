@@ -10,7 +10,11 @@ struct MainTabView: View {
     private var children: [LocalEntity]
     // Stored in the App Group suite so the timer widget/intents target the same child.
     @AppStorage("selectedChildID", store: SharedDefaults.suite) private var selectedChildID = 0
+    /// The marketing version whose What's New card has been seen on this device. App-local, not in
+    /// the App Group suite: the widget has no use for it.
+    @AppStorage("lastWhatsNewVersion") private var lastWhatsNewVersion = ""
     @State private var selectedTab = initialTab
+    @State private var whatsNew: ReleaseNote?
 
     var body: some View {
         TabView(selection: $selectedTab) {
@@ -44,6 +48,12 @@ struct MainTabView: View {
                                     set: { router.showSupporter = $0 })) {
             SupporterSheet(source: .deeplink)
         }
+        .onAppear { presentWhatsNewIfNeeded() }
+        .fullScreenCover(item: $whatsNew) { note in
+            WhatsNewView(note: note, source: .launch) {
+                lastWhatsNewVersion = ReleaseNotes.currentVersion
+            }
+        }
         .safeAreaInset(edge: .top) {
             if !sync.isOnline {
                 Label("Offline — changes will sync when reconnected", systemImage: "wifi.slash")
@@ -60,6 +70,34 @@ struct MainTabView: View {
             AccessibilityNotification.Announcement(
                 online ? "Back online" : "Offline. Changes will sync when reconnected.").post()
         }
+    }
+
+    /// Show the What's New card once per marketing version, and only to someone who was already
+    /// running an earlier one — a fresh install has onboarding to introduce the app, so it records
+    /// the version silently and starts showing cards from the next update. The version is written
+    /// when the card is dismissed, not here, so a crash on the way up doesn't swallow the release.
+    private func presentWhatsNewIfNeeded() {
+        #if DEBUG
+        if ProcessInfo.processInfo.environment["BB_OPEN_WHATSNEW"] == "1" {
+            whatsNew = ReleaseNotes.note(for: ReleaseNotes.currentVersion) ?? ReleaseNotes.all().first
+            return
+        }
+        #endif
+        let current = ReleaseNotes.currentVersion
+        guard !current.isEmpty, lastWhatsNewVersion != current else { return }
+        guard !lastWhatsNewVersion.isEmpty else {
+            lastWhatsNewVersion = current
+            return
+        }
+        // A release that shipped without a `whatsnew` block simply has nothing to say. Record it
+        // rather than re-reading the file on every launch until the next release.
+        guard let note = ReleaseNotes.note(for: current) else {
+            lastWhatsNewVersion = current
+            return
+        }
+        whatsNew = note
+        // The card carries its own support ask, so it takes the nudge policy's slot.
+        SupportNudgeStore.shared.snoozeNudges()
     }
 
     private static var initialTab: Int {
