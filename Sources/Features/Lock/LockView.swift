@@ -16,7 +16,10 @@ struct LockView: View {
                     .buttonStyle(.borderedProminent)
             }
         }
-        // A full-screen modal barrier so VoiceOver stays within the lock screen…
+        // A full-screen modal barrier so VoiceOver stays within the lock screen — `.contain` first,
+        // or the trait lands on a view that isn't an accessibility container and does nothing: the
+        // Dashboard behind the lock stayed readable, which is the whole point of locking.
+        .accessibilityElement(children: .contain)
         .accessibilityAddTraits(.isModal)
         // …and announces why the app's content just disappeared.
         .onAppear { AccessibilityNotification.Announcement("Baby Buddy is locked").post() }
