@@ -30,11 +30,27 @@ class ServerTestCase: UITestCase {
         }
         api = BabyBuddyAPI(baseURL: url, token: token)
         if let reason = await Self.probeOnce(api) { throw XCTSkip(reason) }
+        await Self.sweepOnce(api)
 
         marker = "ci-\(UUID().uuidString.prefix(8))"
         let api = api, marker = marker, paths = sweptPaths
         addTeardownBlock { await api.deleteMarked(in: paths, marker: marker) }
     }
+
+    /// Clears timers an earlier run left running, once per run.
+    ///
+    /// `addTeardownBlock` only fires when a test finishes, so a run killed part-way — a cancelled
+    /// CI job, a stopped `xcodebuild` — leaves its timer running on the shared server. The next run
+    /// then finds two "Stop" buttons on the Dashboard and fails on the ambiguity, and stays failing
+    /// until someone deletes the timer by hand. Sweeping before the first test is what makes that
+    /// self-healing rather than a manual step; per-test teardown still handles the normal path.
+    private static func sweepOnce(_ api: BabyBuddyAPI) async {
+        guard !swept else { return }
+        swept = true
+        await api.deleteStaleTimers(prefix: "ci-")
+    }
+
+    private static var swept = false
 
     /// `nil` when the server is usable. A server that can't be reached skips the suite; a token it
     /// refuses doesn't — that's a broken secret, and silence would lose the coverage for good.

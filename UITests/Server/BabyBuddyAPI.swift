@@ -107,6 +107,27 @@ struct BabyBuddyAPI {
         }
     }
 
+    /// Deletes timers left running by a run that never reached its teardown — a cancelled CI job,
+    /// a stopped `xcodebuild`, a crashed runner.
+    ///
+    /// Timers are the only litter that breaks the *next* run rather than merely sitting there: a
+    /// second running timer puts a second "Stop" on the Dashboard, and the tap then can't tell them
+    /// apart. Everything else a killed run leaves behind carries a marker no later test looks for.
+    ///
+    /// Age-gated rather than a blanket delete of every `ci-` timer, so two runs overlapping on the
+    /// same server don't delete each other's live timer — an in-flight one is seconds old.
+    func deleteStaleTimers(prefix: String, olderThan age: TimeInterval = 30 * 60) async {
+        let cutoff = Date().addingTimeInterval(-age)
+        for timer in (try? await list("timers")) ?? [] {
+            guard let id = timer["id"] as? Int,
+                  (timer["name"] as? String)?.hasPrefix(prefix) == true,
+                  let started = (timer["start"] as? String).flatMap(Date.fromAPI),
+                  started < cutoff
+            else { continue }
+            try? await delete("timers", id: id)
+        }
+    }
+
     /// The child the app will select: the server's first.
     func firstChild() async throws -> (id: Int, firstName: String) {
         guard let child = try await list("children", ["limit": "1"]).first,
@@ -163,12 +184,26 @@ struct BabyBuddyAPI {
 extension Date {
     /// The format Baby Buddy's API takes for times.
     var apiTime: String { ISO8601DateFormatter.api.string(from: self) }
+
+    /// Reads a time back out of a response. Both formatters are tried because some Baby Buddy
+    /// versions return fractional seconds and some don't, and a formatter set for one rejects the
+    /// other outright — a silent `nil` here would quietly stop the stale sweep from ever firing.
+    static func fromAPI(_ string: String) -> Date? {
+        ISO8601DateFormatter.api.date(from: string)
+            ?? ISO8601DateFormatter.apiFractional.date(from: string)
+    }
 }
 
 extension ISO8601DateFormatter {
     static let api: ISO8601DateFormatter = {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime]
+        return formatter
+    }()
+
+    static let apiFractional: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         return formatter
     }()
 }
