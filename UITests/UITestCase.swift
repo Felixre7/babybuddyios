@@ -35,6 +35,23 @@ class UITestCase: XCTestCase {
         app.launchEnvironment = env.merging(environment) { $1 }
         app.launchArguments = ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"] // queries match English
         app.launch()
+        // `launch()` returns while the generated launch screen — which has no text on it — is still
+        // up, and the first launch of a run creates the store, wipes it and reseeds before the
+        // first frame. Waiting here means a slow start reads as a slow start rather than as a
+        // missing element.
+        XCTAssertTrue(app.staticTexts.firstMatch.waitForExistence(timeout: 60),
+                      "The app never drew anything after launch")
+        // iOS prewarms app processes, and a prewarmed one starts *without* the launch environment:
+        // no `BB_DEMO`, so the app comes up signed out on onboarding, as if no hook had been
+        // passed. It only ever hits the first launch of a run, and only on a simulator the app has
+        // run on before, which is why an erased one never shows it. Replacing that instance costs
+        // one relaunch.
+        if demo, app.staticTexts["Connect to your self-hosted server"].waitForExistence(timeout: 3) {
+            app.terminate()
+            app.launch()
+            XCTAssertTrue(app.tabBars.firstMatch.waitForExistence(timeout: 60),
+                          "The app came up signed out even after a relaunch")
+        }
     }
 
     /// Waits for the element (a navigation title, a row, a button) and fails with its query when it
@@ -54,6 +71,32 @@ class UITestCase: XCTestCase {
     ) {
         if !element.waitForNonExistence(timeout: timeout) {
             fail("Still on screen: \(element)", file: file, line: line)
+        }
+    }
+
+    /// Waits for an element's value — a switch's "0"/"1", a field's text. A switch read straight
+    /// after its own tap can still answer with the old value, especially on the first tap after the
+    /// app comes back from the background.
+    func expectValue(
+        _ element: XCUIElement, _ value: String, timeout: TimeInterval = 5,
+        file: StaticString = #filePath, line: UInt = #line
+    ) {
+        expect(element, matching: NSPredicate(format: "value == %@", value), timeout: timeout,
+               describedAs: "to read “\(value)”", file: file, line: line)
+    }
+
+    /// Waits for a predicate about an element — the general form behind ``expectValue``. Write it
+    /// as a block (`NSPredicate { … }`) for anything but `value`: the format-string form reads
+    /// attributes through KVC, and `"selected == true"` never became true even with the trait
+    /// plainly in the tree.
+    func expect(
+        _ element: XCUIElement, matching predicate: NSPredicate, timeout: TimeInterval,
+        describedAs expectation: String, file: StaticString = #filePath, line: UInt = #line
+    ) {
+        let outcome = XCTWaiter().wait(
+            for: [XCTNSPredicateExpectation(predicate: predicate, object: element)], timeout: timeout)
+        if outcome != .completed {
+            fail("Expected \(element) \(expectation)", file: file, line: line)
         }
     }
 
@@ -92,6 +135,27 @@ class UITestCase: XCTestCase {
     /// labels ("Diapers, 2", "Feeding, Formula · Bottle · 20m, 9:14 AM").
     func element(labeled prefix: String) -> XCUIElement {
         app.descendants(matching: .any).labeled(prefix)
+    }
+
+    // MARK: Outside the app
+
+    /// The system's own UI: notification banners, Notification Center, Live Activities and the
+    /// permission prompts the app raises. None of them belong to the app's element tree.
+    var springboard: XCUIApplication { XCUIApplication(bundleIdentifier: "com.apple.springboard") }
+
+    /// Sends the app to the background, the way someone leaving the app does.
+    func pressHome() {
+        XCUIDevice.shared.press(.home)
+        XCTAssertTrue(app.wait(for: .runningBackground, timeout: 10), "The app stayed in the foreground")
+    }
+
+    /// Pulls Notification Center down over the Home Screen — where a banner that has already
+    /// expired, and any Live Activity, can still be found. Dragging from the left of the notch:
+    /// the right side is Control Center.
+    func openNotificationCenter() {
+        springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.2, dy: 0))
+            .press(forDuration: 0.1,
+                   thenDragTo: springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.2, dy: 0.7)))
     }
 
     /// Every element whose label matches a predicate, e.g. one kind's timeline rows:

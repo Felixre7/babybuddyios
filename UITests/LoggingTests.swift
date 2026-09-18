@@ -188,4 +188,28 @@ final class LoggingTests: UITestCase {
         expect(app.navigationBars["Edit Medication"])
         XCTAssertTrue(app.buttons.labeled("4h").exists, "The dose should reopen with its interval")
     }
+
+    /// Baby Buddy refuses a record dated in the future, and the editor says so before the save
+    /// rather than showing the server's rejection afterwards (#100).
+    func testFutureTimeIsRefusedWithAReason() {
+        launch()
+        openEditor("Diaper")
+        let bar = expect(app.navigationBars["New Diaper Change"])
+        XCTAssertTrue(bar.buttons["Save"].isEnabled)
+
+        // The compact picker holds three buttons: the pair, then the date, then the time.
+        let dateButton = app.datePickers.firstMatch.buttons.element(boundBy: 1)
+        tap(dateButton)
+        tap(app.buttons["DatePicker.NextMonth"])
+        // Day cells are the only labels ending in a day number while the calendar is up, and the
+        // 15th of next month is in the future whatever today is.
+        tap(app.buttons.matching(NSPredicate(format: "label ENDSWITH ' 15'")).firstMatch)
+        tap(dateButton) // close the calendar, so the notice underneath can be read
+
+        expect(element(labeled: "Can\u{2019}t save yet. That time is in the future"))
+        XCTAssertFalse(bar.buttons["Save"].isEnabled, "A future change mustn't be sendable")
+        XCTAssertFalse(app.buttons["Save Diaper Change"].isEnabled)
+        tap(bar.buttons["Cancel"])
+        expectGone(bar)
+    }
 }

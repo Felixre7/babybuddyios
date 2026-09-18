@@ -28,4 +28,27 @@ final class DashboardTests: UITestCase {
         app.open(URL(string: "babybuddy://day/feeding")!)
         expect(app.navigationBars["Feeding · Today"])
     }
+
+    /// The three support surfaces, each forced onto the Dashboard by `BB_NUDGE` rather than by
+    /// aging an install a week (#59). Every one of them takes no for an answer, and the milestone's
+    /// ask opens the supporter sheet.
+    func testSupportNudgeSurfaces() {
+        let gentle = app.staticTexts["Enjoying Baby\u{00a0}Buddy\u{00a0}Companion?"]
+        launch(["BB_NUDGE": "gentle"])
+        expect(gentle)
+        tap(app.buttons["Maybe later"])
+        expectGone(gentle)
+
+        launch(["BB_NUDGE": "milestone"])
+        expect(app.staticTexts["MILESTONE"]) // the eyebrow is uppercased in the design system
+        expect(elements("label CONTAINS 'activities logged'").firstMatch)
+        tap(app.buttons["Become a Supporter"])
+        expect(app.staticTexts["Purchases aren't available in this build."])
+
+        launch(["BB_NUDGE": "banner"])
+        let banner = element(labeled: "Free for everyone. If the app helps")
+        expect(banner)
+        tap(app.buttons["Dismiss"])
+        expectGone(banner)
+    }
 }

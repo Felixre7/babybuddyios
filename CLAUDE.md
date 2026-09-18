@@ -53,6 +53,11 @@ An offline-first iOS client for a self-hosted [Baby Buddy](https://github.com/ba
   total. Reach editors through "+" ▸ More… — the quick-add rows are due to log in one tap (#78).
 - The keyboard covers the tab bar, so a tab tap with it up lands on a key: type `\n` first. An
   active search also hides the Timeline toolbar until its "Close" button ends it.
+- Notifications and Live Activities live outside the app, in SpringBoard: `UITestCase` has
+  `springboard`, `pressHome()` and `openNotificationCenter()` for them. A Live Activity is
+  `springboard.otherElements["activity-content-view"]`; a delivered alert is matched by its text,
+  on its banner or its Notification Center row. `BB_TIMER_ALERT_SECONDS` and
+  `BB_DOSE_ALERT_SECONDS` shorten the waits — 30 minutes and 4 hours otherwise.
 
 ## UI
 
