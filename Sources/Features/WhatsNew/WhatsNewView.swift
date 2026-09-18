@@ -44,11 +44,11 @@ struct WhatsNewView: View {
             Analytics.whatsNewDismissed(source: source)
         }
         .sheet(isPresented: $showingSupporter) {
-            // Attributed to `.settings`: adding a `SupporterSource` case of its own would change
-            // how existing tip signals are dimensioned. `WhatsNew.supporterTapped` already records
-            // the tap on this side, so the door is not lost — only the tip's own attribution is
-            // shared with Settings.
-            SupporterSheet(source: .settings)
+            // Its own source, so a tip from here is never counted as a Settings tip. Deliberately
+            // one source whether the card was opened on launch or from Settings — this answers
+            // which surface earned the tip, and `WhatsNew.supporterTapped` splits the two on the
+            // card's own side if that is ever the question.
+            SupporterSheet(source: .whatsNew)
         }
     }
 

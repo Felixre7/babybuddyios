@@ -212,6 +212,15 @@ final class AnalyticsSignalTests: XCTestCase {
                        ["launch", "settings"])
     }
 
+    /// Pins the whole supporter-source vocabulary. Each support surface has to keep its own value
+    /// or a tip lands in a shared bucket and the question "which screen earned this?" stops having
+    /// an answer — which is the entire reason `source` is threaded through the purchase at all.
+    func testEverySupportSurfaceHasItsOwnSource() {
+        XCTAssertEqual(
+            Analytics.SupporterSource.allCases.map(\.rawValue).sorted(),
+            ["deeplink", "nudgeBanner", "nudgeGentle", "nudgeMilestone", "settings", "whatsNew"])
+    }
+
     func testNudgeDismissedAndRetiredCarryTheTally() {
         Analytics.nudgeDismissed(variant: .banner, dismissCount: 2)
         Analytics.nudgeRetired()

@@ -272,11 +272,15 @@ extension Analytics {
     /// Threaded through every signal from there on, so a tip is attributable to the entry point that
     /// produced it from a single signal. TelemetryDeck is signal-based, so this is deliberately a
     /// parameter on the existing events rather than a separate "converted" signal to join against.
-    enum SupporterSource: String {
+    enum SupporterSource: String, CaseIterable {
         /// Settings ▸ Baby Buddy App Supporter.
         case settings
         /// The `babybuddy://supporter` deep link.
         case deeplink
+        /// "Support development" on the What's New card — wherever that card was opened from.
+        /// `WhatsNew.supporterTapped` splits launch from Settings on the card's own side, so this
+        /// stays one source: the question it answers is which *surface* earned the tip.
+        case whatsNew
         /// The one-time gentle ask (nudge variant A).
         case nudgeGentle
         /// A milestone celebration (nudge variant B).

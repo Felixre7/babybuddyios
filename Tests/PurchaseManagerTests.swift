@@ -264,8 +264,10 @@ final class PurchaseManagerTests: XCTestCase {
     /// deliberately instead of a separate "converted" event to join against. A source that stopped
     /// being attached would leave a funnel that still totals correctly and attributes nothing.
     func testEveryTierAndSourceReachesEveryFunnelSignal() {
-        let sources: [Analytics.SupporterSource] =
-            [.settings, .deeplink, .nudgeGentle, .nudgeMilestone, .nudgeBanner]
+        // `allCases` rather than a hand-kept list: a new entry point that forgets to thread its
+        // source through is exactly the failure this test exists to catch, and a list here would
+        // have to be remembered to catch it.
+        let sources = Analytics.SupporterSource.allCases
         XCTAssertEqual(Set(sources.map(\.rawValue)).count, sources.count, "sources must be distinct")
 
         for tier in TipTier.allCases {
