@@ -144,9 +144,15 @@ class UITestCase: XCTestCase {
     var springboard: XCUIApplication { XCUIApplication(bundleIdentifier: "com.apple.springboard") }
 
     /// Sends the app to the background, the way someone leaving the app does.
+    ///
+    /// The wait is generous because suspending isn't instant when the app has just asked the system
+    /// for something: toggling the Live Activity setting off and back on leaves that request in
+    /// flight, and on a GitHub-hosted runner — slower than a development Mac — 10 seconds wasn't
+    /// enough for it to settle. The assertion still fails loudly if the app never backgrounds at
+    /// all; only the patience changed.
     func pressHome() {
         XCUIDevice.shared.press(.home)
-        XCTAssertTrue(app.wait(for: .runningBackground, timeout: 10), "The app stayed in the foreground")
+        XCTAssertTrue(app.wait(for: .runningBackground, timeout: 30), "The app stayed in the foreground")
     }
 
     /// Pulls Notification Center down over the Home Screen — where a banner that has already
