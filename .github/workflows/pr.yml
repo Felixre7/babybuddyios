@@ -35,27 +35,42 @@ jobs:
           else
             echo "code=false" >> "$GITHUB_OUTPUT"; echo "docs-only PR: skipping the macOS build"
           fi
+      # Sharding the UI suite means a class nobody assigned to a shard simply never runs, and a
+      # green tick is exactly what that looks like. This is the guard: the shards have to name
+      # every test class in UITests/, and only classes that exist.
+      - name: Every UI test class belongs to a shard
+        run: |
+          python3 - <<'PY'
+          import pathlib, re, sys
+          workflow = pathlib.Path(".github/workflows/pr.yml").read_text()
+          sharded = {c for line in re.findall(r"^\s*classes:\s*(.+)$", workflow, re.M)
+                       for c in line.split()}
+          # One class per file, named after it (UITestCase is the base class, and has no tests).
+          onDisk = {p.stem for p in pathlib.Path("UITests").glob("*.swift")
+                    if "func test" in p.read_text()}
+          for what, names in (("never run", onDisk - sharded), ("do not exist", sharded - onDisk)):
+              if names:
+                  print(f"::error::UI test classes that {what}: {', '.join(sorted(names))}")
+          if sharded != onDisk:
+              sys.exit(1)
+          print(f"{len(onDisk)} UI test classes, all sharded")
+          PY
 
-  build-and-test:
-    name: build-and-test
+  # The three macOS lanes below used to be one job that ran them in sequence, which took ~53
+  # minutes: 6 for the build and unit tests, 35 for the UI tests, 10 for the server ones. They
+  # depend only on `changes`, not on each other — a run that reports every failure at once is worth
+  # more than one that stops at the first, and runner minutes are free on a public repository.
+  #
+  # macos-26 is pinned rather than macos-latest: the suite needs iOS 26+, and -latest moves to the
+  # next major on GitHub's schedule, not ours. That image is Apple Silicon with Xcode 26.6 as
+  # default and iOS 26.2/26.4/26.5 simulator runtimes.
+
+  unit:
+    name: unit
     needs: changes
     if: needs.changes.outputs.code == 'true'
-    # GitHub's macOS runners, which are free for a public repository. Pinned to
-    # macos-26 rather than macos-latest: the suite needs iOS 26+, and -latest moves
-    # to the next major on GitHub's schedule, not ours. That image is Apple Silicon
-    # with Xcode 26.6 as default and iOS 26.2/26.4/26.5 simulator runtimes.
-    #
-    # This used to run on the development Mac via scripts/runner.sh. That was free
-    # too, but the job only ran when the Mac was awake, reachable and not already
-    # busy — a queued job, a wedged runner connection and a simulator another
-    # process had upset all read as CI failures. The timeout stops a forgotten run
-    # from hanging forever.
     runs-on: macos-26
-    timeout-minutes: 60
-    env:
-      # A fork's PR gets no secrets, and `secrets` can't be read from a step's `if` — so the server
-      # lane's condition rides on this instead, and skips there rather than failing the job.
-      HAS_DEMO_SERVER: ${{ secrets.BB_E2E_TOKEN != '' }}
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       # On iOS 26 SwiftUI shows a confirmationDialog as a popover and UIKit drops its
@@ -68,21 +83,7 @@ jobs:
             echo "::error::confirmationDialog loses its Cancel on iOS 26 — use .alert or a design-system dialog (CLAUDE.md ▸ UI)"
             exit 1
           fi
-      - name: Install XcodeGen
-        run: command -v xcodegen >/dev/null || brew install xcodegen
-      # BabyBuddy.xcodeproj is gitignored — the project is generated from project.yml.
-      - name: Generate project
-        run: xcodegen generate
-      - name: Cache SwiftPM checkouts
-        uses: actions/cache@v4
-        with:
-          path: build/SourcePackages
-          key: spm-${{ runner.os }}-${{ hashFiles('project.yml') }}
-          restore-keys: spm-${{ runner.os }}-
-      # A named device of CI's own, on the newest iOS runtime the image ships.
-      # The runner is a fresh VM, so this creates it every run rather than reusing
-      # one; the name is what scripts/ui-test.sh takes as UI_TEST_DEVICE, and it
-      # keeps the local and CI lanes on the same device either way.
+      - uses: ./.github/actions/ios-setup
       - name: Pick a simulator
         id: sim
         run: |
@@ -110,12 +111,9 @@ jobs:
           xcrun simctl list devices | grep "$UDID"
       # The scheme builds BabyBuddyWidgets as a dependency, so this also catches an
       # app-only import sneaking into Sources/Shared or Sources/Persistence, which
-      # compile into the widget target too. The runner's workspace is outside
-      # ~/Documents, so the iCloud xattr/codesigning trap doesn't apply here.
+      # compile into the widget target too.
       - name: Build and test
-        id: unit
         run: |
-          rm -rf build/Tests.xcresult   # harmless on a fresh VM, needed if run locally
           xcodebuild -project BabyBuddy.xcodeproj -scheme BabyBuddy \
             -destination "id=${{ steps.sim.outputs.udid }}" \
             -clonedSourcePackagesDirPath build/SourcePackages \
@@ -135,43 +133,128 @@ jobs:
               print("  FAIL {}.{}: {}".format(t.get("targetName"), t.get("testName"), t.get("failureText")))
           sys.exit(0 if d.get("failedTests", 1) == 0 and d.get("totalTestCount", 0) > 0 else 1)
           '
-      # The XCUITest suite, once the unit tests pass, on the same CI device —
-      # scripts/ui-test.sh erases it first and prints its own summary. Iterations
-      # are 2 so a test gets exactly one retry: one absorbs a simulator hiccup; a
-      # test that needs it every run gets fixed, not retried.
+
+  # The XCUITest suite, split four ways. Each shard is a whole test class or three: xcodebuild has
+  # no sharding of its own, and a class is the smallest unit `-only-testing` addresses that doesn't
+  # need a generated list kept in step with the source.
+  #
+  # The grouping is balanced by measured duration, not by test count — DashboardTests is two tests
+  # and 95 seconds, TimerTests is three and the same. Re-measure from a result bundle
+  # (`xcresulttool get test-results tests`) if the balance drifts.
+  #
+  # Four shards, not more: LoggingTests alone is ~21% of the suite, so it is the floor no split of
+  # whole classes can beat. A fifth shard would shave nothing off the critical path.
+  ui:
+    name: ui (${{ matrix.shard }})
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: macos-26
+    timeout-minutes: 40
+    strategy:
+      # One shard failing shouldn't hide the results of the other three.
+      fail-fast: false
+      matrix:
+        include:
+          - shard: logging
+            classes: LoggingTests
+          - shard: timers
+            classes: LiveActivityTests SmokeTests TimerTests
+          - shard: timeline
+            classes: TimelineTests DialogTests SyncTests
+          - shard: settings
+            classes: NotificationTests SettingsTests DashboardTests
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/ios-setup
+      # Iterations are 2 so a test gets exactly one retry: one absorbs a simulator
+      # hiccup; a test that needs it every run gets fixed, not retried.
+      #
+      # scripts/ui-test.sh creates and erases its own device, so each shard gets a clean one, and
+      # `-only-testing` with an unknown class name fails the run rather than passing with zero tests.
       - name: UI tests
         id: ui
-        if: ${{ !cancelled() && steps.unit.outcome == 'success' }}
         run: |
-          UI_TEST_DEVICE=CI-BabyBuddy scripts/ui-test.sh \
+          ONLY=""
+          for CLASS in ${{ matrix.classes }}; do
+            ONLY="$ONLY -only-testing:BabyBuddyUITests/$CLASS"
+          done
+          scripts/ui-test.sh \
             -clonedSourcePackagesDirPath build/SourcePackages \
-            -retry-tests-on-failure -test-iterations 2
+            -retry-tests-on-failure -test-iterations 2 \
+            $ONLY
       - name: Upload the UI test result bundle
         # Demo data only (the seed and the tests' own records), with a screenshot
-        # of every failure — the runner is discarded when the job ends.
+        # of every failure — the runner is discarded when the job ends. The name
+        # carries the shard: upload-artifact rejects two uploads sharing one name.
         if: ${{ !cancelled() && steps.ui.outcome == 'failure' }}
         uses: actions/upload-artifact@v4
         with:
-          name: UITests.xcresult
+          name: UITests-${{ matrix.shard }}.xcresult
           path: build/UITests.xcresult
           retention-days: 7
-      # The demo server lane: a real sign-in, push, pull, conflict and rejection against the Baby
-      # Buddy server App Review also uses. Its own cap, so a hang in the network fails this step
-      # rather than eating the job's hour. The tests skip themselves if the server is unreachable,
-      # and the summary raises a warning when they do.
-      #
-      # Its result bundle is deliberately NOT uploaded: this repository is public, and XCUITest
-      # records typed text — including the token the sign-in types.
+
+  # The demo server lane: a real sign-in, push, pull, conflict and rejection against the Baby Buddy
+  # server App Review also uses. Its own cap, so a hang in the network fails this job rather than
+  # eating an hour.
+  #
+  # Deliberately NOT sharded, and never to be: all six tests sign into one shared server, so two of
+  # them running at once would see each other's records — a second running timer puts a second
+  # "Stop" on the Dashboard, and the tap can no longer tell them apart. The tests skip themselves
+  # if the server is unreachable, and the summary raises a warning when they do.
+  #
+  # Its result bundle is deliberately NOT uploaded: this repository is public, and XCUITest records
+  # typed text — including the token the sign-in types.
+  server:
+    name: server
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: macos-26
+    timeout-minutes: 30
+    env:
+      # A fork's PR gets no secrets, and `secrets` can't be read from a step's `if` — so the lane's
+      # condition rides on this instead, and skips there rather than failing the job.
+      HAS_DEMO_SERVER: ${{ secrets.BB_E2E_TOKEN != '' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/ios-setup
       - name: Server UI tests
-        if: ${{ !cancelled() && steps.unit.outcome == 'success' && env.HAS_DEMO_SERVER == 'true' }}
-        timeout-minutes: 25
+        if: env.HAS_DEMO_SERVER == 'true'
         env:
           BB_E2E_SERVER_URL: ${{ secrets.BB_E2E_SERVER_URL }}
           BB_E2E_TOKEN: ${{ secrets.BB_E2E_TOKEN }}
         run: |
-          UI_TEST_DEVICE=CI-BabyBuddy scripts/ui-test.sh --server \
+          scripts/ui-test.sh --server \
             -clonedSourcePackagesDirPath build/SourcePackages \
             -retry-tests-on-failure -test-iterations 2
+
+  # The ruleset on main requires a check called `build-and-test`, which used to be the single macOS
+  # job. Rather than teach the ruleset four shard names — which would strand it again the next time
+  # the split changes — that name lives on here as an aggregator over the lanes. It is the only
+  # place the shard layout is coupled to a repository setting, and now it isn't.
+  #
+  # `always()` so it still reports when a lane fails, and a skipped lane passes: on a docs-only PR
+  # the three macOS jobs don't run at all.
+  build-and-test:
+    name: build-and-test
+    needs: [unit, ui, server]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Every lane passed
+        run: |
+          for LANE in "unit=${{ needs.unit.result }}" \
+                      "ui=${{ needs.ui.result }}" \
+                      "server=${{ needs.server.result }}"; do
+            echo "$LANE"
+            case "${LANE#*=}" in
+              success|skipped) ;;
+              *) FAILED=1 ;;
+            esac
+          done
+          if [ -n "${FAILED:-}" ]; then
+            echo "::error::a test lane did not pass"
+            exit 1
+          fi
 
   attribution:
     name: attribution

@@ -1,0 +1,24 @@
+name: iOS setup
+description: >
+  XcodeGen, the generated project and the SwiftPM cache — everything the macOS lanes need before
+  they can build. Factored out because there are now four of them (unit, three UI shards, server)
+  and three copies of the same steps is three places to forget.
+
+runs:
+  using: composite
+  steps:
+    - name: Install XcodeGen
+      shell: bash
+      run: command -v xcodegen >/dev/null || brew install xcodegen
+    # BabyBuddy.xcodeproj is gitignored — the project is generated from project.yml.
+    - name: Generate project
+      shell: bash
+      run: xcodegen generate
+    # Every lane resolves the same packages, and they run at the same time: whichever finishes
+    # first writes the cache and the rest log a collision and move on, which is harmless.
+    - name: Cache SwiftPM checkouts
+      uses: actions/cache@v4
+      with:
+        path: build/SourcePackages
+        key: spm-${{ runner.os }}-${{ hashFiles('project.yml') }}
+        restore-keys: spm-${{ runner.os }}-
