@@ -15,7 +15,7 @@ permissions:
 jobs:
   changes:
     name: changes
-    runs-on: [self-hosted, Linux]
+    runs-on: ubuntu-latest
     outputs:
       code: ${{ steps.filter.outputs.code }}
     steps:
@@ -40,10 +40,17 @@ jobs:
     name: build-and-test
     needs: changes
     if: needs.changes.outputs.code == 'true'
-    # Runs on the development Mac (scripts/runner.sh), not GitHub's metered macOS
-    # runners. If the Mac is asleep the job queues; the timeout stops a forgotten
-    # run from hanging forever.
-    runs-on: [self-hosted, macOS]
+    # GitHub's macOS runners, which are free for a public repository. Pinned to
+    # macos-26 rather than macos-latest: the suite needs iOS 26+, and -latest moves
+    # to the next major on GitHub's schedule, not ours. That image is Apple Silicon
+    # with Xcode 26.6 as default and iOS 26.2/26.4/26.5 simulator runtimes.
+    #
+    # This used to run on the development Mac via scripts/runner.sh. That was free
+    # too, but the job only ran when the Mac was awake, reachable and not already
+    # busy — a queued job, a wedged runner connection and a simulator another
+    # process had upset all read as CI failures. The timeout stops a forgotten run
+    # from hanging forever.
+    runs-on: macos-26
     timeout-minutes: 60
     env:
       # A fork's PR gets no secrets, and `secrets` can't be read from a step's `if` — so the server
@@ -53,7 +60,8 @@ jobs:
       - uses: actions/checkout@v4
       # On iOS 26 SwiftUI shows a confirmationDialog as a popover and UIKit drops its
       # cancel action — a destructive prompt with no way back shipped three times
-      # (#89, #90, #119). `git grep`, not grep: the Mac's grep is ugrep.
+      # (#89, #90, #119). `git grep`, not grep: it behaves the same here and on a
+      # dev Mac, where plain grep may be ugrep.
       - name: No confirmationDialog
         run: |
           if git grep -n '\.confirmationDialog(' -- Sources Widgets; then
@@ -71,10 +79,10 @@ jobs:
           path: build/SourcePackages
           key: spm-${{ runner.os }}-${{ hashFiles('project.yml') }}
           restore-keys: spm-${{ runner.os }}-
-      # A simulator CI shares with a human aborts the run ("Test crashed with
-      # signal kill before establishing connection") the moment someone else
-      # starts a test on the same device. The Mac is a development machine, so CI
-      # gets its own device, created once and reused, on the newest iOS runtime.
+      # A named device of CI's own, on the newest iOS runtime the image ships.
+      # The runner is a fresh VM, so this creates it every run rather than reusing
+      # one; the name is what scripts/ui-test.sh takes as UI_TEST_DEVICE, and it
+      # keeps the local and CI lanes on the same device either way.
       - name: Pick a simulator
         id: sim
         run: |
@@ -107,7 +115,7 @@ jobs:
       - name: Build and test
         id: unit
         run: |
-          rm -rf build/Tests.xcresult   # the runner reuses its workspace
+          rm -rf build/Tests.xcresult   # harmless on a fresh VM, needed if run locally
           xcodebuild -project BabyBuddy.xcodeproj -scheme BabyBuddy \
             -destination "id=${{ steps.sim.outputs.udid }}" \
             -clonedSourcePackagesDirPath build/SourcePackages \
@@ -140,7 +148,7 @@ jobs:
             -retry-tests-on-failure -test-iterations 2
       - name: Upload the UI test result bundle
         # Demo data only (the seed and the tests' own records), with a screenshot
-        # of every failure — the runner wipes its workspace on the next run.
+        # of every failure — the runner is discarded when the job ends.
         if: ${{ !cancelled() && steps.ui.outcome == 'failure' }}
         uses: actions/upload-artifact@v4
         with:
@@ -167,7 +175,7 @@ jobs:
 
   attribution:
     name: attribution
-    runs-on: [self-hosted, Linux]
+    runs-on: ubuntu-latest
     env:
       GH_TOKEN: ${{ github.token }}
       PATTERN: '(?i)^(co-authored-by|signed-off-by):.*(claude|anthropic|codex|openai|copilot|cursor|gemini|devin|aider)|generated (with|by) \[?(claude|codex|copilot|cursor|gemini|aider)|claude\.com/claude-code|🤖 generated'

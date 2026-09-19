@@ -16,10 +16,15 @@ An offline-first iOS client for a self-hosted [Baby Buddy](https://github.com/ba
 
 ## CI
 
-- `.github/workflows/pr.yml` builds and tests every PR that touches code, on the
-  self-hosted runners: the Mac (`scripts/runner.sh`) for `build-and-test`, the Linux box
-  (`scripts/runner-linux.sh`) for the docs-only filter and the attribution check. A queued
-  macOS job usually means the Mac is asleep, not a CI fault.
+- `.github/workflows/pr.yml` builds and tests every PR that touches code, on **GitHub's
+  runners**, which are free because this repository is public: `macos-26` for
+  `build-and-test`, `ubuntu-latest` for the docs-only filter and the attribution check.
+  Pinned to `macos-26`, not `macos-latest` — the suite needs iOS 26+, and `-latest` moves to
+  the next major on GitHub's schedule.
+- The self-hosted runners (`scripts/runner.sh` on the Mac, `scripts/runner-linux.sh` on the
+  Linux box) are no longer used by this workflow. They were free too, but a job only ran when
+  that machine was awake, reachable and not already busy, and a wedged runner connection or a
+  simulator another process had upset both read as CI failures.
 - CI runs `xcodegen generate` then `xcodebuild ... test CODE_SIGNING_ALLOWED=NO` against the
   newest available iPhone simulator. The scheme builds the widget as a dependency, so an
   app-only import added to `Sources/Shared` or `Sources/Persistence` fails there.
