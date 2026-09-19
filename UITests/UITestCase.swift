@@ -145,14 +145,17 @@ class UITestCase: XCTestCase {
 
     /// Sends the app to the background, the way someone leaving the app does.
     ///
-    /// The wait is generous because suspending isn't instant when the app has just asked the system
-    /// for something: toggling the Live Activity setting off and back on leaves that request in
-    /// flight, and on a GitHub-hosted runner — slower than a development Mac — 10 seconds wasn't
-    /// enough for it to settle. The assertion still fails loudly if the app never backgrounds at
-    /// all; only the patience changed.
-    func pressHome() {
-        XCUIDevice.shared.press(.home)
-        XCTAssertTrue(app.wait(for: .runningBackground, timeout: 30), "The app stayed in the foreground")
+    /// The press is repeated rather than simply waited on for longer. A home press issued while the
+    /// system is still busy — moments after a launch, or with a Live Activity request in flight —
+    /// is dropped rather than queued, and no amount of extra patience turns a press that never
+    /// landed into a backgrounded app. Raising the single wait to 30 seconds on a hosted runner
+    /// wasn't enough on its own, which is what pointed at the press rather than the waiting.
+    func pressHome(file: StaticString = #filePath, line: UInt = #line) {
+        for _ in 1...3 {
+            XCUIDevice.shared.press(.home)
+            if app.wait(for: .runningBackground, timeout: 10) { return }
+        }
+        XCTFail("The app stayed in the foreground", file: file, line: line)
     }
 
     /// Pulls Notification Center down over the Home Screen — where a banner that has already
