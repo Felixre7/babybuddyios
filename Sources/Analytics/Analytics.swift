@@ -272,11 +272,15 @@ extension Analytics {
     /// Threaded through every signal from there on, so a tip is attributable to the entry point that
     /// produced it from a single signal. TelemetryDeck is signal-based, so this is deliberately a
     /// parameter on the existing events rather than a separate "converted" signal to join against.
-    enum SupporterSource: String {
+    enum SupporterSource: String, CaseIterable {
         /// Settings ▸ Baby Buddy App Supporter.
         case settings
         /// The `babybuddy://supporter` deep link.
         case deeplink
+        /// "Support development" on the What's New card — wherever that card was opened from.
+        /// `WhatsNew.supporterTapped` splits launch from Settings on the card's own side, so this
+        /// stays one source: the question it answers is which *surface* earned the tip.
+        case whatsNew
         /// The one-time gentle ask (nudge variant A).
         case nudgeGentle
         /// A milestone celebration (nudge variant B).
@@ -413,6 +417,46 @@ extension Analytics {
     /// once, on the dismissal that crosses the line.
     static func nudgeRetired() {
         signal("Nudge.retired")
+    }
+
+    // MARK: What's New
+    //
+    // The release card (see ``WhatsNewView``). Four signals covering the whole of it: it appeared,
+    // and then exactly one of the three ways out. Nothing about the release's contents is carried —
+    // the version is already a TelemetryDeck default parameter on every signal, so repeating it
+    // here would only double it up.
+    //
+    // As with the nudges there is no "converted" signal: tapping through to the tip sheet shows up
+    // as a `Supporter.sheetViewed` / `Tip.*` carrying the matching ``SupporterSource``.
+
+    /// Where a What's New card was opened from.
+    enum WhatsNewSource: String, CaseIterable {
+        /// Shown automatically on the first launch after an update.
+        case launch
+        /// Opened on purpose from Settings.
+        case settings
+    }
+
+    /// The card reached the screen.
+    static func whatsNewShown(source: WhatsNewSource) {
+        signal("WhatsNew.shown", parameters: ["source": source.rawValue])
+    }
+
+    /// Continue (or Done, from Settings) was tapped — the card was read and closed.
+    static func whatsNewContinued(source: WhatsNewSource) {
+        signal("WhatsNew.continued", parameters: ["source": source.rawValue])
+    }
+
+    /// "Support development" was tapped. Whether that became a tip is answered by the
+    /// ``SupporterSource`` on the sheet's own signals, not here.
+    static func whatsNewSupporterTapped(source: WhatsNewSource) {
+        signal("WhatsNew.supporterTapped", parameters: ["source": source.rawValue])
+    }
+
+    /// The card was closed without tapping Continue — swiped away from the Settings sheet. The
+    /// launch card is a full-screen cover with no swipe, so this is rare there by construction.
+    static func whatsNewDismissed(source: WhatsNewSource) {
+        signal("WhatsNew.dismissed", parameters: ["source": source.rawValue])
     }
 
     /// Why ``APIClient/splitPage(_:allowsUnpaginatedArray:)`` couldn't read a list body, as a closed

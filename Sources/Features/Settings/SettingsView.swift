@@ -50,6 +50,7 @@ struct SettingsView: View {
     @State private var showingPending = false
     @State private var showingSignOut = false
     @State private var showingAcknowledgements = false
+    @State private var showingWhatsNew = false
     @State private var showingSupporter = false
     /// Whether a nudge has been shown yet, which is what reveals the "Support reminders" switch.
     /// Refreshed on appear rather than observed: nudges only ever fire from the Dashboard, so this
@@ -188,6 +189,11 @@ struct SettingsView: View {
             }
             .sheet(isPresented: $showingSupporter) { SupporterSheet(source: .settings) }
             .sheet(isPresented: $showingAcknowledgements) { AcknowledgementsView() }
+            .sheet(isPresented: $showingWhatsNew) {
+                if let note = whatsNewNote {
+                    WhatsNewView(note: note, source: .settings, dismissTitle: "Done")
+                }
+            }
             .sheet(isPresented: $showingPending) { PendingChangesView() }
             .sheet(item: $debugConflict) { c in
                 NavigationStack { ConflictResolutionView(conflict: c) }
@@ -708,7 +714,28 @@ struct SettingsView: View {
                 }
             }
             .buttonStyle(.plain)
+
+            // Only appears when this release shipped card copy — see Docs/release-notes.md. A row
+            // that opens an empty screen is worse than no row.
+            if let note = whatsNewNote {
+                rowDivider
+
+                Button { showingWhatsNew = true } label: {
+                    SettingsRow(symbol: "sparkles", tint: BBColor.brand, title: "What's New") {
+                        Text(note.version)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .buttonStyle(.plain)
+            }
         }
+    }
+
+    /// The current release's card copy, read once per body evaluation rather than held in state —
+    /// it is a small file read, and it cannot change while the app is running.
+    private var whatsNewNote: ReleaseNote? {
+        ReleaseNotes.note(for: ReleaseNotes.currentVersion)
     }
 
     /// Opens the App Store listing with its review composer already up. Deliberately not

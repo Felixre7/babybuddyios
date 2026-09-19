@@ -36,6 +36,11 @@ targets:
     platform: iOS
     sources:
       - path: Sources
+      # The release notes ship as a resource so the What's New card reads the same file the App
+      # Store text is written in — one place, no generated copy to drift. App target only: the
+      # widget has no use for it. See Sources/Features/WhatsNew/ReleaseNotes.swift.
+      - path: Docs/release-notes.md
+        buildPhase: resources
     configFiles:
       Debug: Config/BabyBuddy.xcconfig
       Release: Config/BabyBuddy.xcconfig

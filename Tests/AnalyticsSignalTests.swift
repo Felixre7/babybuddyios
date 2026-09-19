@@ -188,6 +188,39 @@ final class AnalyticsSignalTests: XCTestCase {
         XCTAssertEqual(plain.parameters("Nudge.shown"), ["variant": "gentle"])
     }
 
+    /// The What's New card carries its entry point and nothing else — in particular not the release
+    /// it described, which TelemetryDeck already attaches to every signal as a default parameter.
+    func testWhatsNewSignalsCarryOnlyTheSource() {
+        Analytics.whatsNewShown(source: .launch)
+        Analytics.whatsNewContinued(source: .launch)
+        Analytics.whatsNewSupporterTapped(source: .settings)
+        Analytics.whatsNewDismissed(source: .settings)
+
+        XCTAssertEqual(recorder.parameters("WhatsNew.shown"), ["source": "launch"])
+        XCTAssertEqual(recorder.parameters("WhatsNew.continued"), ["source": "launch"])
+        XCTAssertEqual(recorder.parameters("WhatsNew.supporterTapped"), ["source": "settings"])
+        XCTAssertEqual(recorder.parameters("WhatsNew.dismissed"), ["source": "settings"])
+    }
+
+    /// Shown is one event and the ways out are mutually exclusive, so a funnel can be read as
+    /// `shown` minus the three exits without any of them double-counting.
+    func testWhatsNewHasOneShownAndThreeDistinctExits() {
+        let names = ["WhatsNew.shown", "WhatsNew.continued",
+                     "WhatsNew.supporterTapped", "WhatsNew.dismissed"]
+        XCTAssertEqual(Set(names).count, names.count)
+        XCTAssertEqual(Set(Analytics.WhatsNewSource.allCases.map(\.rawValue)),
+                       ["launch", "settings"])
+    }
+
+    /// Pins the whole supporter-source vocabulary. Each support surface has to keep its own value
+    /// or a tip lands in a shared bucket and the question "which screen earned this?" stops having
+    /// an answer — which is the entire reason `source` is threaded through the purchase at all.
+    func testEverySupportSurfaceHasItsOwnSource() {
+        XCTAssertEqual(
+            Analytics.SupporterSource.allCases.map(\.rawValue).sorted(),
+            ["deeplink", "nudgeBanner", "nudgeGentle", "nudgeMilestone", "settings", "whatsNew"])
+    }
+
     func testNudgeDismissedAndRetiredCarryTheTally() {
         Analytics.nudgeDismissed(variant: .banner, dismissCount: 2)
         Analytics.nudgeRetired()
