@@ -1,7 +1,8 @@
 // node --test scripts/release.test.mjs
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { APP_STORE_LIMIT, appStoreNotes, githubBody, validate } from './release.mjs'
+import { generateKeyPairSync, verify } from 'node:crypto'
+import { APP_STORE_LIMIT, appStoreNotes, githubBody, jwt, validate } from './release.mjs'
 
 const F = '```'
 const section = (version, appstore, whatsnew = '#New\n- new | A title | A body') =>
@@ -88,4 +89,17 @@ test("App Store Connect's 4,000-character limit is enforced, in characters not b
 
 test('a heading inside a fence is text, not a section', () => {
   assert.equal(appStoreNotes(section('1.2', '#New\n## not a version'), '1.2'), '#New\n## not a version')
+})
+
+test('the App Store Connect token is ES256 with a raw, not DER, signature', () => {
+  const { privateKey, publicKey } = generateKeyPairSync('ec', { namedCurve: 'P-256' })
+  const pem = privateKey.export({ type: 'pkcs8', format: 'pem' })
+  const [head, claims, signature] = jwt({ keyId: 'KEY', issuerId: 'ISSUER', privateKey: pem, now: 1_000_000 }).split('.')
+
+  assert.deepEqual(JSON.parse(Buffer.from(head, 'base64url')), { alg: 'ES256', kid: 'KEY', typ: 'JWT' })
+  assert.deepEqual(JSON.parse(Buffer.from(claims, 'base64url')),
+    { iss: 'ISSUER', iat: 1000, exp: 1600, aud: 'appstoreconnect-v1' })
+  const raw = Buffer.from(signature, 'base64url')
+  assert.equal(raw.length, 64) // r‖s; a DER signature is 70-72 bytes
+  assert.ok(verify('sha256', Buffer.from(`${head}.${claims}`), { key: publicKey, dsaEncoding: 'ieee-p1363' }, raw))
 })

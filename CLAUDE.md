@@ -7,6 +7,12 @@ An offline-first iOS client for a self-hosted [Baby Buddy](https://github.com/ba
 - **Never bump `MARKETING_VERSION` unprompted.** It is the App Store version, and a new one sends the next TestFlight build through App Store review instead of straight to testers. It changes only when the owner asks for a release — ask first, every time.
 - **"Bump the version" means `CURRENT_PROJECT_VERSION`** — the build number. Bump it for every upload; a build number may only be used once per marketing version.
 - Both live in `project.yml` and apply to the app and the widget alike; App Store Connect rejects an upload whose extension version doesn't match the app's.
+- **Publish Release** (`.github/workflows/publish-release.yml`, run by hand from `main`) publishes
+  a version's draft GitHub Release — creating its `v<version>` tag — and rebuilds babybuddy.app,
+  but only once App Store Connect reports the version `READY_FOR_DISTRIBUTION` and the build Apple
+  shipped matches the draft's commit. GitHub Releases carry notes and an App Store link, never a
+  build. `node scripts/release.mjs status <version>` asks App Store Connect the same question
+  locally, with `ASC_KEY_ID`, `ASC_ISSUER_ID` and `ASC_APP_ID` set.
 
 ## Build
 

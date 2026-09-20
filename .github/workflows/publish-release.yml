@@ -1,0 +1,129 @@
+name: Publish Release
+
+# Run by hand once the App Store version is live. Publishes the draft GitHub Release that Prepare
+# Release made — which is what creates the version tag — then rebuilds babybuddy.app so
+# /whatsnew/ shows it. Uploads nothing: the App Store is the only place a build comes from.
+#
+# Safe to run early or twice. Before Apple reports the version as live it stops without changing
+# anything; once the release is public it skips straight to the website rebuild.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: The App Store version, e.g. 1.1.0
+        required: true
+        type: string
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: write   # publish the release, which creates the tag
+
+jobs:
+  publish:
+    name: publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # The environment holds the App Store Connect key and the deploy hook, and only hands them to
+    # `main` — that policy is the real guard, since a run from another branch uses that branch's
+    # copy of this file. The first step only says so more clearly.
+    environment: release
+    env:
+      GH_TOKEN: ${{ github.token }}
+      VERSION: ${{ inputs.version }}
+      TAG: v${{ inputs.version }}
+    steps:
+      - name: Only from main
+        run: |
+          if [ "$GITHUB_REF" != "refs/heads/main" ]; then
+            echo "::error::run this from main, not $GITHUB_REF"; exit 1
+          fi
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]]; then
+            echo "::error::\"$VERSION\" is not a version number"; exit 1
+          fi
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # the draft's commit has to be checked against main's history
+
+      # `gh release view` finds drafts; the REST "release by tag" endpoint does not.
+      - name: Find the GitHub Release
+        id: release
+        run: |
+          if ! gh release view "$TAG" --json isDraft,targetCommitish > release.json; then
+            echo "::error::no GitHub Release for $TAG — run Prepare Release first"; exit 1
+          fi
+          echo "draft=$(jq -r .isDraft release.json)" >> "$GITHUB_OUTPUT"
+          echo "sha=$(jq -r .targetCommitish release.json)" >> "$GITHUB_OUTPUT"
+
+      - name: The App Store version is live
+        id: asc
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_PRIVATE_KEY_P8: ${{ secrets.ASC_PRIVATE_KEY_P8 }}
+          ASC_APP_ID: ${{ vars.ASC_APP_ID }}
+        run: |
+          node scripts/release.mjs status "$VERSION" | tee status.txt
+          STATE=$(grep '^state=' status.txt | cut -d= -f2)
+          echo "build=$(grep '^build=' status.txt | cut -d= -f2)" >> "$GITHUB_OUTPUT"
+          # A version submitted for manual release waits at PENDING_DEVELOPER_RELEASE until it is
+          # released in App Store Connect. Refusing then is the point, not a fault.
+          if [ "$STATE" != "READY_FOR_DISTRIBUTION" ]; then
+            echo "::error::$VERSION is $STATE, not READY_FOR_DISTRIBUTION — nothing was published"; exit 1
+          fi
+
+      # Against the draft's own commit, not main's tip: review takes days and main moves on.
+      - name: The draft is the commit that shipped
+        if: steps.release.outputs.draft == 'true'
+        env:
+          SHA: ${{ steps.release.outputs.sha }}
+          ASC_BUILD: ${{ steps.asc.outputs.build }}
+        run: |
+          fail() { echo "::error::$1"; exit 1; }
+          [[ "$SHA" =~ ^[0-9a-f]{40}$ ]] || fail "the draft targets \"$SHA\", not a full commit SHA — rerun Prepare Release"
+          git merge-base --is-ancestor "$SHA" origin/main || fail "$SHA is not on main"
+
+          field() { git show "$SHA:project.yml" | sed -nE "s/^ *$1: *\"?([^\"]*)\"? *$/\1/p" | head -1; }
+          [ "$(field MARKETING_VERSION)" = "$VERSION" ] || fail "MARKETING_VERSION at $SHA is $(field MARKETING_VERSION), not $VERSION"
+          # A fix and build bump merged after a rejection, without rerunning Prepare Release, would
+          # otherwise put the tag on a commit Apple never saw.
+          [ "$(field CURRENT_PROJECT_VERSION)" = "$ASC_BUILD" ] || fail "Apple shipped build $ASC_BUILD; $SHA is build $(field CURRENT_PROJECT_VERSION) — rerun Prepare Release on the commit that was archived"
+
+          git show "$SHA:Docs/release-notes.md" > "$RUNNER_TEMP/release-notes.md"
+          RELEASE_NOTES="$RUNNER_TEMP/release-notes.md" node scripts/release.mjs body "$VERSION" > "$RUNNER_TEMP/body.md"
+
+      - name: Publish
+        if: steps.release.outputs.draft == 'true'
+        run: |
+          gh release edit "$TAG" --notes-file "$RUNNER_TEMP/body.md" --draft=false --latest
+          if [ "$(gh release view "$TAG" --json assets --jq '.assets | length')" != "0" ]; then
+            echo "::warning::$TAG has uploaded assets — releases are meant to carry none"
+          fi
+
+      - name: Already public
+        if: steps.release.outputs.draft != 'true'
+        run: echo "$TAG is already published — only rebuilding the website" >> "$GITHUB_STEP_SUMMARY"
+
+      # Called from here rather than an `on: release` workflow: a release published with
+      # GITHUB_TOKEN does not fire one.
+      - name: Rebuild babybuddy.app
+        env:
+          HOOK: ${{ secrets.CLOUDFLARE_DEPLOY_HOOK_URL }}
+        run: curl -fsS -X POST "$HOOK" -o /dev/null && echo "website build requested"
+
+      # The query string changes each try so the poll never reads an edge-cached copy. A timeout is
+      # a warning only: the GitHub Release is valid whether or not the site caught up.
+      - name: /whatsnew/ shows the version
+        run: |
+          PATTERN=">Version ${VERSION//./\\.}<"
+          for TRY in $(seq 1 30); do
+            if curl -fsS "https://babybuddy.app/whatsnew/?run=$GITHUB_RUN_ID-$TRY" | grep -qE "$PATTERN"; then
+              echo "babybuddy.app/whatsnew/ shows $VERSION" | tee -a "$GITHUB_STEP_SUMMARY"; exit 0
+            fi
+            sleep 20
+          done
+          echo "::warning::babybuddy.app/whatsnew/ does not show $VERSION after 10 minutes — check the Cloudflare build"
