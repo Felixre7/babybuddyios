@@ -18,6 +18,19 @@ An offline-first iOS client for a self-hosted [Baby Buddy](https://github.com/ba
   build. `node scripts/release.mjs status <version>` asks App Store Connect the same question
   locally, with `ASC_KEY_ID`, `ASC_ISSUER_ID` and `ASC_APP_ID` set.
 
+## Sorting PRs: a milestone or `internal`
+
+Every PR gets exactly one of the two, so the public history says what each change was for and the
+release notes can be written from the milestone:
+
+- **A user would notice it** — a feature, a fix, a wording change, an accessibility fix: put it on
+  the milestone titled with the App Store version it will ship in (`1.1.0`, no `v`).
+- **Nobody using the app would notice** — CI, tests, tooling, docs, refactors: add the `internal`
+  label, no milestone, and leave `## What to test` empty.
+- **A test or CI PR that also fixes something in `Sources/` or `Widgets/` is user-visible.** The
+  tests find real bugs — #120, #121, #123 and #124 each carried one under a title about tests. Go
+  by the diff, not the title; better still, split the fix out.
+
 ## Build
 
 - The project is generated: **run `xcodegen generate` after adding or removing a Swift file.** `BabyBuddy.xcodeproj` is gitignored.
