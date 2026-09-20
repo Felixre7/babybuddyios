@@ -5,10 +5,11 @@
 //   node scripts/release.mjs notes 1.1.0     the App Store text, byte for byte
 //   node scripts/release.mjs body 1.1.0      the GitHub Release body, as Markdown
 //   node scripts/release.mjs status 1.1.0    what App Store Connect says: its state, its build
+//   node scripts/release.mjs send 1.1.0      put the App Store text in the version's What's New
 //
 // `RELEASE_NOTES=<path>` reads another copy of the notes — the release workflows check the file
-// as it was at the release's commit. `status` needs ASC_KEY_ID and ASC_ISSUER_ID, and the key in
-// ASC_PRIVATE_KEY_P8 or, locally, ~/.appstoreconnect/private_keys/AuthKey_<ASC_KEY_ID>.p8.
+// as it was at the release's commit. `status` and `send` need ASC_APP_ID, ASC_KEY_ID and
+// ASC_ISSUER_ID, and the key in ASC_PRIVATE_KEY_P8 or, locally, ~/.appstoreconnect/private_keys/AuthKey_<ASC_KEY_ID>.p8.
 //
 // No dependencies, on purpose: this runs in CI and in the release workflows with nothing installed.
 
@@ -121,9 +122,11 @@ function credentials(env = process.env) {
   return { keyId, issuerId, privateKey }
 }
 
-async function asc(path) {
+async function asc(path, body) {
   const response = await fetch(`https://api.appstoreconnect.apple.com${path}`, {
-    headers: { Authorization: `Bearer ${jwt(credentials())}` },
+    method: body ? 'PATCH' : 'GET',
+    headers: { Authorization: `Bearer ${jwt(credentials())}`, 'Content-Type': 'application/json' },
+    body: body && JSON.stringify(body),
   })
   // Apple's error bodies name the problem and carry no credential; the token is never printed.
   if (!response.ok) throw new Error(`App Store Connect ${response.status} for ${path}\n${await response.text()}`)
@@ -138,6 +141,19 @@ export async function status(version, appId = process.env.ASC_APP_ID) {
   if (data.length !== 1) throw new Error(`${version}: App Store Connect has ${data.length} iOS versions with that number`)
   const { data: build } = await asc(`/v1/appStoreVersions/${data[0].id}/build`)
   return { id: data[0].id, state: data[0].attributes.appVersionState, build: build?.attributes.version ?? null }
+}
+
+/// Overwrites the version's "What's New in This Version" for one locale, and nothing else: it does
+/// not create the version, pick a build, or submit. Apple refuses with a 409 unless the version is
+/// still editable, so there is no state check here to fall out of date.
+export async function sendWhatsNew(version, whatsNew, locale = process.env.ASC_LOCALE ?? 'en-US') {
+  const { id } = await status(version)
+  const { data } = await asc(`/v1/appStoreVersions/${id}/appStoreVersionLocalizations?limit=200`)
+  const localization = data.find((l) => l.attributes.locale === locale)
+  if (!localization) throw new Error(`${version}: no ${locale} localization in App Store Connect`)
+  await asc(`/v1/appStoreVersionLocalizations/${localization.id}`, {
+    data: { type: 'appStoreVersionLocalizations', id: localization.id, attributes: { whatsNew } },
+  })
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
@@ -158,8 +174,12 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       // `state=… build=…`, one per line, so a workflow can read it with `grep`.
       const { state, build } = await status(version)
       console.log(`state=${state}\nbuild=${build ?? ''}`)
+    } else if (command === 'send' && version) {
+      const notes = appStoreNotes(markdown, version)
+      await sendWhatsNew(version, notes)
+      console.log(`${version}: What's New updated, ${[...notes].length} characters`)
     } else {
-      console.error('usage: release.mjs validate | notes <version> | body <version> | status <version>')
+      console.error('usage: release.mjs validate | notes <version> | body <version> | status <version> | send <version>')
       process.exit(2)
     }
   } catch (error) {
