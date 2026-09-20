@@ -6,7 +6,8 @@
 
 <Tester-facing. Two to four plain bullets in Kurtis's voice, no internal
 names. Collected into TestFlight's What to Test on the next release. Leave
-empty and add the `internal` label if a tester would notice nothing.>
+empty and add the `internal` label if a tester would notice nothing.
+Otherwise put the PR on the milestone of the version it ships in.>
 
 -
 
