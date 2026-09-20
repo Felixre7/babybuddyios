@@ -4,10 +4,17 @@
 //   node scripts/release.mjs validate        every section, as CI runs it
 //   node scripts/release.mjs notes 1.1.0     the App Store text, byte for byte
 //   node scripts/release.mjs body 1.1.0      the GitHub Release body, as Markdown
+//   node scripts/release.mjs status 1.1.0    what App Store Connect says: its state, its build
+//
+// `RELEASE_NOTES=<path>` reads another copy of the notes — the release workflows check the file
+// as it was at the release's commit. `status` needs ASC_KEY_ID and ASC_ISSUER_ID, and the key in
+// ASC_PRIVATE_KEY_P8 or, locally, ~/.appstoreconnect/private_keys/AuthKey_<ASC_KEY_ID>.p8.
 //
 // No dependencies, on purpose: this runs in CI and in the release workflows with nothing installed.
 
+import { sign } from 'node:crypto'
 import { readFileSync } from 'node:fs'
+import { homedir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 
 export const APP_STORE_URL = 'https://apps.apple.com/app/id6788966667'
@@ -91,9 +98,52 @@ export function githubBody(notes, url = APP_STORE_URL) {
   return `**[Get it on the App Store](${url})**\n\n${body.trim()}\n`
 }
 
+// MARK: App Store Connect
+
+const base64url = (value) => Buffer.from(value).toString('base64url')
+
+/// A short-lived App Store Connect token. `ieee-p1363` is the part that fails silently: Node signs
+/// ECDSA as DER by default, a JWT wants the raw r‖s pair, and Apple answers the DER one with a
+/// bare 401.
+export function jwt({ keyId, issuerId, privateKey, now = Date.now() }) {
+  const iat = Math.floor(now / 1000)
+  const head = base64url(JSON.stringify({ alg: 'ES256', kid: keyId, typ: 'JWT' }))
+  const claims = base64url(JSON.stringify({ iss: issuerId, iat, exp: iat + 600, aud: 'appstoreconnect-v1' }))
+  const signature = sign('sha256', Buffer.from(`${head}.${claims}`), { key: privateKey, dsaEncoding: 'ieee-p1363' })
+  return `${head}.${claims}.${base64url(signature)}`
+}
+
+function credentials(env = process.env) {
+  const { ASC_KEY_ID: keyId, ASC_ISSUER_ID: issuerId } = env
+  if (!keyId || !issuerId) throw new Error('ASC_KEY_ID and ASC_ISSUER_ID must be set')
+  const privateKey = env.ASC_PRIVATE_KEY_P8 ||
+    readFileSync(`${homedir()}/.appstoreconnect/private_keys/AuthKey_${keyId}.p8`, 'utf8')
+  return { keyId, issuerId, privateKey }
+}
+
+async function asc(path) {
+  const response = await fetch(`https://api.appstoreconnect.apple.com${path}`, {
+    headers: { Authorization: `Bearer ${jwt(credentials())}` },
+  })
+  // Apple's error bodies name the problem and carry no credential; the token is never printed.
+  if (!response.ok) throw new Error(`App Store Connect ${response.status} for ${path}\n${await response.text()}`)
+  return response.json()
+}
+
+/// The iOS App Store version's state and the build attached to it, if any.
+export async function status(version, appId = process.env.ASC_APP_ID) {
+  if (!appId) throw new Error('ASC_APP_ID must be set')
+  const query = `filter[versionString]=${encodeURIComponent(version)}&filter[platform]=IOS`
+  const { data } = await asc(`/v1/apps/${appId}/appStoreVersions?${query}`)
+  if (data.length !== 1) throw new Error(`${version}: App Store Connect has ${data.length} iOS versions with that number`)
+  const { data: build } = await asc(`/v1/appStoreVersions/${data[0].id}/build`)
+  return { id: data[0].id, state: data[0].attributes.appVersionState, build: build?.attributes.version ?? null }
+}
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const [command, version] = process.argv.slice(2)
-  const markdown = readFileSync(new URL('../Docs/release-notes.md', import.meta.url), 'utf8')
+  const notesFile = process.env.RELEASE_NOTES ?? new URL('../Docs/release-notes.md', import.meta.url)
+  const markdown = readFileSync(notesFile, 'utf8')
   try {
     if (command === 'validate') {
       const errors = validate(markdown)
@@ -104,8 +154,12 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       process.stdout.write(appStoreNotes(markdown, version))
     } else if (command === 'body' && version) {
       process.stdout.write(githubBody(appStoreNotes(markdown, version)))
+    } else if (command === 'status' && version) {
+      // `state=… build=…`, one per line, so a workflow can read it with `grep`.
+      const { state, build } = await status(version)
+      console.log(`state=${state}\nbuild=${build ?? ''}`)
     } else {
-      console.error('usage: release.mjs validate | notes <version> | body <version>')
+      console.error('usage: release.mjs validate | notes <version> | body <version> | status <version>')
       process.exit(2)
     }
   } catch (error) {
