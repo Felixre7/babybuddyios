@@ -36,8 +36,8 @@ test('the appstore block is chosen by its label, not its position', () => {
   assert.deepEqual(validate(swapped), [])
 })
 
-test('the GitHub body turns labels into headings and leads with the App Store link', () => {
-  assert.equal(githubBody(STORE, 'https://example.com/app'), `**[Get it on the App Store](https://example.com/app)**
+test('the GitHub body turns labels into headings and leads with the App Store badge', () => {
+  assert.equal(githubBody(STORE, 'https://example.com/app'), `[![Download on the App Store](https://raw.githubusercontent.com/kguy18/babybuddyios/main/Docs/app-store-badge.svg)](https://example.com/app)
 
 ### New
 - Settings → Pending Changes shows “why” — and what to do…

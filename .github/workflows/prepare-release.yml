@@ -80,10 +80,10 @@ jobs:
         run: |
           if [ "${{ steps.check.outputs.exists }}" = "true" ]; then
             gh release edit "$TAG" --draft --target "$GITHUB_SHA" \
-              --title "Baby Buddy Companion $VERSION" --notes-file "$RUNNER_TEMP/body.md"
+              --title "$TAG" --notes-file "$RUNNER_TEMP/body.md"
           else
             gh release create "$TAG" --draft --target "$GITHUB_SHA" \
-              --title "Baby Buddy Companion $VERSION" --notes-file "$RUNNER_TEMP/body.md"
+              --title "$TAG" --notes-file "$RUNNER_TEMP/body.md"
           fi
 
       - name: Summary

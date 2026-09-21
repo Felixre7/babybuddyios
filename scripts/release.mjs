@@ -19,6 +19,8 @@ import { homedir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 
 export const APP_STORE_URL = 'https://apps.apple.com/app/id6788966667'
+// Absolute, because a release page cannot resolve a path into the repository the way the README does.
+const BADGE_URL = 'https://raw.githubusercontent.com/kguy18/babybuddyios/main/Docs/app-store-badge.svg'
 /// App Store Connect's cap on "What's New in This Version".
 export const APP_STORE_LIMIT = 4000
 
@@ -91,12 +93,12 @@ export function appStoreNotes(markdown, version) {
 }
 
 /// The GitHub Release body: `#New` becomes a heading, the bullets are already Markdown, and the
-/// App Store link leads, because the release carries no build to download.
+/// App Store badge leads, because the release carries no build to download.
 // ponytail: the store text is not escaped for Markdown. It is plain prose today; escape `*`, `_`
 // and `<` here if a note ever needs them literally.
 export function githubBody(notes, url = APP_STORE_URL) {
   const body = notes.replace(/^#\s*(\S.*)$/gm, '### $1')
-  return `**[Get it on the App Store](${url})**\n\n${body.trim()}\n`
+  return `[![Download on the App Store](${BADGE_URL})](${url})\n\n${body.trim()}\n`
 }
 
 // MARK: App Store Connect
