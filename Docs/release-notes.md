@@ -26,6 +26,40 @@ trimming is the whole parser.
 The rest of the store listing (description, keywords, review information) lives in
 `app_store_listing.md`, which is gitignored because it stages the reviewer's demo credentials.
 
+## 1.1.0
+
+```appstore
+#New
+- Medication reminders. The medication editor has a new "Next dose after" picker, and your iPhone can tell you when the next dose is OK. The Dashboard counts down to it, and logging a dose too early shows a warning — it warns, it does not stop you. Tapping the reminder opens a new dose already filled in. Off by default: Settings → Notifications. Each phone schedules its own reminders from synced doses, so pull to refresh before giving one.
+- Forgotten timer alerts. If a timer runs past a limit you choose — 2 hours for a feeding, 12 for sleep, and so on — you get a notification that opens straight to Stop Timer. Off by default: Settings → Notifications.
+- Undo after logging. Every record you log shows "Undo" for five seconds, so a mis-tap at 2 a.m. is one tap to fix. You can turn it off in Settings → Quick Log.
+- The Dashboard and the status widget now say when the data was last updated, and change colour when it is getting old. Choose how old in Settings → Server → Stale after.
+- Trends now charts tummy time (minutes per day) and pumping (amount and sessions per day).
+- A short What's New card appears the first time you open the app after an update. It is also in Settings → Support.
+
+#Improved
+- VoiceOver: the sign-out buttons, the switches in Settings and the Trends period picker now read as what they are, the lock screen keeps VoiceOver inside it, and a record the server refused says it needs attention instead of "waiting to sync".
+
+#Fixed
+- Deleting a record on iOS 26 now asks with a Cancel button. Before, the prompt only offered Delete.
+- A mistyped API token now says the token was rejected, instead of "You don't have permission to do that."
+- Turning Live Activity off and straight back on no longer leaves a running timer without its banner.
+```
+
+```whatsnew
+#New
+- alert | Medication reminders | Set "Next dose after" and get a notification when the next dose is OK.
+- new | More in Trends | Tummy time and pumping now have their own charts.
+- timer | Forgotten timer alerts | A nudge when a timer runs too long. Turn it on in Settings → Notifications.
+- guard | Undo after logging | Every new record shows Undo for five seconds, so a mis-tap is one tap to fix.
+- sync | Last sync time | The Dashboard and status widget show when data was last updated.
+#Fixed
+- Deleting a record asks first, with a way to cancel
+- A wrong API token says so, instead of "no permission"
+- Live Activity comes back after turning it off and on
+- VoiceOver reads buttons and switches by name
+```
+
 ## 1.0.3
 
 ```appstore
