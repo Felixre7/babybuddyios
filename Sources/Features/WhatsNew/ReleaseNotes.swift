@@ -91,6 +91,17 @@ enum ReleaseNotes {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? ""
     }
 
+    /// Where the version whose card this device last saw is kept — app-local defaults, the same
+    /// key `MainTabView` reads through `@AppStorage`.
+    static let lastSeenKey = "lastWhatsNewVersion"
+
+    /// A fresh sign-in has just been through onboarding, so this version's card would be noise:
+    /// record it as seen. This is what lets an *empty* value mean "signed in since before 1.1.0,
+    /// the first release with a card" — an upgrade, which does get the card.
+    static func markCurrentSeen() {
+        UserDefaults.standard.set(currentVersion, forKey: lastSeenKey)
+    }
+
     // MARK: Parsing
 
     private enum Section { case new, fixed }
