@@ -47,6 +47,18 @@ final class DashboardTests: UITestCase {
         expect(element(labeled: "Medication, Tylenol"))
     }
 
+    /// A Latest row opens that kind's full local history, not its editor: every cached sleep,
+    /// beyond today's.
+    func testLatestRowOpensKindHistory() {
+        launch()
+        tap(element(labeled: "Sleep, "))
+        let all = expect(app.navigationBars["Sleep · All"])
+        XCTAssertGreaterThan(elements("label BEGINSWITH 'Sleep, '").count, 1)
+        XCTAssertFalse(app.navigationBars["Edit Sleep"].exists)
+        tap(all.buttons.firstMatch) // back
+        expect(element(labeled: "Feedings, "))
+    }
+
     /// The three support surfaces, each forced onto the Dashboard by `BB_NUDGE` rather than by
     /// aging an install a week (#59). Every one of them takes no for an answer, and the milestone's
     /// ask opens the supporter sheet.
