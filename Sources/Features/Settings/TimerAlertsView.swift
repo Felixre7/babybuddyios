@@ -7,9 +7,14 @@ struct TimerAlertsView: View {
     @AppStorage(ForgottenTimerPolicy.enabledKey, store: SharedDefaults.suite) private var enabled = false
     /// The thresholds live in the App Group, which SwiftUI can't observe through
     /// `ForgottenTimerPolicy.threshold(for:)` — a pick never redrew the row. This mirror is what
-    /// the rows read; `threshold(_:)` writes both.
-    @State private var thresholds: [TimerActivity: TimeInterval] = Dictionary(
-        uniqueKeysWithValues: TimerActivity.allCases.map { ($0, ForgottenTimerPolicy.threshold(for: $0)) })
+    /// the rows read; `threshold(_:)` writes both. Reloaded on appear: the initial value is
+    /// captured when Settings builds this destination, so a second visit showed the picks from
+    /// before the first.
+    @State private var thresholds: [TimerActivity: TimeInterval] = stored()
+
+    private static func stored() -> [TimerActivity: TimeInterval] {
+        Dictionary(uniqueKeysWithValues: TimerActivity.allCases.map { ($0, ForgottenTimerPolicy.threshold(for: $0)) })
+    }
 
     var body: some View {
         ScrollView {
@@ -74,6 +79,7 @@ struct TimerAlertsView: View {
             .animation(.default, value: enabled)
         }
         .background(BBColor.surface)
+        .onAppear { thresholds = Self.stored() }
         .navigationTitle("Forgotten timer alerts")
         .navigationBarTitleDisplayMode(.inline)
     }
