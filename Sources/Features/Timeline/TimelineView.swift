@@ -7,6 +7,7 @@ import SwiftData
 struct TimelineView: View {
     @Environment(SyncEngine.self) private var sync
     @Environment(\.modelContext) private var context
+    @Environment(DeepLinkRouter.self) private var router
     @Binding var selectedChildID: Int
 
     /// The selected child's timeline events, filtered store-side (child, kind, delete state) so
@@ -111,6 +112,8 @@ struct TimelineView: View {
             .onChange(of: searchText) { _, newValue in handleSearchChange(newValue) }
             .refreshable { await sync.sync() }
             .onAppear(perform: autoLoadOlderIfRequested)
+            .onAppear { applyRequestedKind(router.showTimelineKind) }
+            .onChange(of: router.showTimelineKind) { _, kind in applyRequestedKind(kind) }
             .sheet(item: $editing) { entity in
                 EntityEditorView(kind: entity.kind, childID: selectedChildID, entity: entity)
             }
@@ -239,6 +242,14 @@ struct TimelineView: View {
 
     private var isFilteringOrSearching: Bool {
         hasActiveFilters || !searchText.trimmingCharacters(in: .whitespaces).isEmpty
+    }
+
+    /// A Latest row on Home asked for this kind: filter to it alone, replacing whatever was set.
+    private func applyRequestedKind(_ kind: EntityKind?) {
+        guard let kind else { return }
+        clearAllFilters()
+        kindFilter = kind
+        router.showTimelineKind = nil
     }
 
     private func clearAllFilters() {
