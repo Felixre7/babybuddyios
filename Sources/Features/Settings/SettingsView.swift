@@ -89,30 +89,18 @@ struct SettingsView: View {
 
                     sectioned("Security") {
                         securityCard
-                        Text(lock.biometryAvailable
-                             ? "Locks the app when reopened after being in the background."
-                             : "Set up Face ID, Touch ID, or a device passcode to enable app lock.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .padding(.horizontal, 4)
-                            .padding(.top, 2)
+                        if !lock.biometryAvailable {
+                            Text("Set up Face ID, Touch ID, or a device passcode to enable app lock.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .padding(.horizontal, 4)
+                                .padding(.top, 2)
+                        }
                     }
 
                     sectioned("Notifications") {
                         notificationsCard
-                        Text("Show a running timer on the Lock Screen and Dynamic Island.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .padding(.horizontal, 4)
-                            .padding(.top, 2)
-                        timerAlertsCard
-                        Text("Get a notification when a timer runs longer than expected, so a forgotten one doesn't file a bogus record.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .padding(.horizontal, 4)
-                            .padding(.top, 2)
-                        doseRemindersCard
-                        Text("Get a notification when a medication logged with a next-dose interval can be given again. Each phone schedules its own from synced doses, so pull to refresh before giving a dose in case someone else just logged one.")
+                        Text("Each phone schedules its own medication reminders from synced doses, so pull to refresh before giving a dose in case someone else just logged one.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .padding(.horizontal, 4)
@@ -120,14 +108,7 @@ struct SettingsView: View {
                     }
 
                     if icons.isSupported {
-                        sectioned("Appearance") {
-                            appearanceCard
-                            Text("Pick the Home Screen icon. All six are free.")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .padding(.horizontal, 4)
-                                .padding(.top, 2)
-                        }
+                        sectioned("Appearance") { appearanceCard }
                     }
 
                     sectioned("Quick Log") {
@@ -139,14 +120,7 @@ struct SettingsView: View {
                             .padding(.top, 2)
                     }
 
-                    sectioned("Support") {
-                        supportCard
-                        Text("Questions, feedback, or a bug? We'd love to hear from you.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .padding(.horizontal, 4)
-                            .padding(.top, 2)
-                    }
+                    sectioned("Help") { supportCard }
 
                     #if DEBUG
                     sectioned("Developer") { developerCard }
@@ -446,47 +420,35 @@ struct SettingsView: View {
                     .labelsHidden()
                     .tint(BBColor.primary)
             }
-        }
-    }
 
-    /// A local notification once a timer outlives its activity's threshold. Enabling asks for
-    /// notification permission; the per-activity thresholds appear once it's on.
-    private var timerAlertsCard: some View {
-        card {
-            SettingsRow(symbol: "bell.badge", tint: BBColor.restart, title: "Forgotten timer alerts") {
-                alertToggle("Forgotten timer alerts", $timerAlertsEnabled, setting: "forgottenTimerAlerts")
-            }
-            if timerAlertsEnabled {
-                ForEach(TimerActivity.allCases, id: \.self) { activity in
-                    rowDivider
-                    SettingsRow(symbol: activity.systemImage, tint: BBColor.tint(for: activity),
-                                title: "\(activity.timerName) after") {
-                        Menu {
-                            Picker(activity.timerName, selection: thresholdBinding(activity)) {
-                                ForEach(ForgottenTimerPolicy.choices, id: \.self) {
-                                    Text(EntityFormatting.formatInterval($0)).tag($0)
-                                }
-                            }
-                        } label: { menuValue(EntityFormatting.formatInterval(ForgottenTimerPolicy.threshold(for: activity))) }
+            rowDivider
+
+            // The switch and its five per-activity thresholds live on their own screen
+            // (`TimerAlertsView`); unfolding them here pushed the rest of Settings off the page.
+            NavigationLink {
+                TimerAlertsView()
+            } label: {
+                SettingsRow(symbol: "bell.badge", tint: BBColor.restart, title: "Forgotten timer alerts") {
+                    HStack(spacing: 4) {
+                        Text(timerAlertsEnabled ? "On" : "Off")
+                            .font(.subheadline).foregroundStyle(.secondary)
+                        disclosure
                     }
                 }
             }
-        }
-        .animation(.default, value: timerAlertsEnabled)
-    }
+            .buttonStyle(.plain)
 
-    /// A "next dose OK" notification once a medication's next-dose interval has passed.
-    private var doseRemindersCard: some View {
-        card {
+            rowDivider
+
             SettingsRow(symbol: "pills.fill", tint: BBColor.activity(.medication), title: "Medication reminders") {
-                alertToggle("Medication reminders", $doseRemindersEnabled, setting: "medicationReminders")
+                Self.alertToggle("Medication reminders", $doseRemindersEnabled, setting: "medicationReminders")
             }
         }
     }
 
     /// A notifications switch: turning it on asks for permission, and either way the scheduled
     /// notifications catch up. `title` repeats the row's so VoiceOver names the switch itself.
-    private func alertToggle(_ title: String, _ isOn: Binding<Bool>, setting: String) -> some View {
+    static func alertToggle(_ title: String, _ isOn: Binding<Bool>, setting: String) -> some View {
         Toggle(title, isOn: Binding(
             get: { isOn.wrappedValue },
             set: { newValue in
@@ -499,15 +461,6 @@ struct SettingsView: View {
             }))
             .labelsHidden()
             .tint(BBColor.primary)
-    }
-
-    private func thresholdBinding(_ activity: TimerActivity) -> Binding<TimeInterval> {
-        Binding(
-            get: { ForgottenTimerPolicy.threshold(for: activity) },
-            set: { seconds in
-                SharedDefaults.suite.set(seconds, forKey: ForgottenTimerPolicy.thresholdKey(activity))
-                Task { await LocalAlerts.shared.reconcile() }
-            })
     }
 
     // MARK: Appearance
@@ -599,6 +552,24 @@ struct SettingsView: View {
                 }
             }
             .buttonStyle(.plain)
+
+            // Only appears when this release shipped card copy — see Docs/release-notes.md. A row
+            // that opens an empty screen is worse than no row.
+            if let note = whatsNewNote {
+                rowDivider
+
+                Button { showingWhatsNew = true } label: {
+                    SettingsRow(symbol: "sparkles", tint: BBColor.brand, title: "What's New") {
+                        HStack(spacing: 4) {
+                            Text(note.version)
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                            disclosure
+                        }
+                    }
+                }
+                .buttonStyle(.plain)
+            }
 
             supportRemindersRow
         }
@@ -715,20 +686,6 @@ struct SettingsView: View {
             }
             .buttonStyle(.plain)
 
-            // Only appears when this release shipped card copy — see Docs/release-notes.md. A row
-            // that opens an empty screen is worse than no row.
-            if let note = whatsNewNote {
-                rowDivider
-
-                Button { showingWhatsNew = true } label: {
-                    SettingsRow(symbol: "sparkles", tint: BBColor.brand, title: "What's New") {
-                        Text(note.version)
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                .buttonStyle(.plain)
-            }
         }
     }
 
@@ -793,14 +750,23 @@ struct SettingsView: View {
     /// A deliberately quiet footer link — third-party license disclosures and the Baby Buddy
     /// open-source credit live one tap away, without competing with the settings above.
     private var acknowledgementsFooter: some View {
-        Button { showingAcknowledgements = true } label: {
-            Text("Acknowledgements")
+        VStack(spacing: 6) {
+            Button { showingAcknowledgements = true } label: {
+                Text("Acknowledgements")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            // The build number is what a bug report needs; it's the first thing to read off a
+            // screenshot of this screen.
+            Text("Version \(SupportContact.appVersion)")
                 .font(.footnote)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.tertiary)
                 .frame(maxWidth: .infinity, alignment: .center)
-                .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
         .padding(.top, 10)
     }
 

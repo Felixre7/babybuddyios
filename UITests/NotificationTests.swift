@@ -8,19 +8,26 @@ import XCTest
 /// Both alerts are compressed by a launch hook (`BB_TIMER_ALERT_SECONDS`, `BB_DOSE_ALERT_SECONDS`):
 /// the shortest threshold Settings offers is 30 minutes, and the shortest dose interval four hours.
 final class NotificationTests: UITestCase {
-    /// The per-activity thresholds only make sense while the alerts are on, so they follow the
-    /// switch (#116). Their rows are also how #118's medication reminders stayed separate from them.
+    /// The alerts live on their own screen behind a Settings row that reads their state; the
+    /// per-activity thresholds only make sense while they're on, so they follow the switch (#116).
+    /// Their rows are also how #118's medication reminders stayed separate from them.
     func testForgottenTimerAlertRows() {
         launch(["BB_START_TAB": "settings"])
-        let rows = ["Feeding after", "Sleep after", "Tummy time after", "Pumping after"]
+        let rows = ["Feeding", "Sleep", "Tummy time", "Pumping"]
+
+        // The Settings row is a link, not a switch, and says the alerts are off on a fresh install.
+        XCTAssertFalse(app.switches["Forgotten timer alerts"].exists, "The switch is on the sub-screen")
+        tap(app.buttons.labeled("Forgotten timer alerts, Off"))
+        expect(app.navigationBars["Forgotten timer alerts"])
 
         let alerts = app.switches["Forgotten timer alerts"]
         expect(alerts)
         XCTAssertEqual(alerts.value as? String, "0", "Alerts are off on a fresh install")
-        for row in rows { XCTAssertFalse(app.staticTexts[row].exists, "\(row) showed while off") }
+        XCTAssertFalse(app.staticTexts["ALERT AFTER"].exists, "Thresholds showed while off")
 
         alerts.tap()
         allowNotificationsIfAsked() // turning them on is what asks for permission
+        expect(app.staticTexts["ALERT AFTER"])
         for row in rows { expect(app.staticTexts[row]) }
 
         // Each row's menu holds the choices, and picking one sticks. Tummy time is the only
@@ -31,7 +38,11 @@ final class NotificationTests: UITestCase {
 
         alerts.tap()
         expectValue(alerts, "0")
-        for row in rows { expectGone(app.staticTexts[row]) }
+        expectGone(app.staticTexts["ALERT AFTER"])
+
+        // Back in Settings the row reads the switch's state — and on again, without leaving.
+        tap(app.navigationBars.buttons.firstMatch)
+        expect(app.buttons.labeled("Forgotten timer alerts, Off"))
 
         // The medication switch is its own, and doesn't bring the threshold rows with it.
         let doses = app.switches["Medication reminders"]
