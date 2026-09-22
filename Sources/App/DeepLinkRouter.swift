@@ -23,6 +23,10 @@ final class DeepLinkRouter {
     /// handled.
     var openDayKind: EntityKind?
 
+    /// Set when a Latest row on Home asks for the Timeline filtered to its kind; cleared once
+    /// the Timeline has applied it.
+    var showTimelineKind: EntityKind?
+
     /// Set when a medication reminder is tapped: the dose whose next dose is now OK, to log the
     /// next one from. Cleared once handled.
     var repeatDoseLocalID: UUID?

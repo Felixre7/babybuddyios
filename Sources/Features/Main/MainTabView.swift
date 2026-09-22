@@ -46,6 +46,9 @@ struct MainTabView: View {
         .onChange(of: router.openDayKind) { _, kind in
             if kind != nil { selectedTab = 0 } // a status-widget tile targets the Home tab
         }
+        .onChange(of: router.showTimelineKind) { _, kind in
+            if kind != nil { selectedTab = 1 } // a Latest row targets the Timeline tab
+        }
         .sheet(isPresented: Binding(get: { router.showSupporter },
                                     set: { router.showSupporter = $0 })) {
             SupporterSheet(source: .deeplink)

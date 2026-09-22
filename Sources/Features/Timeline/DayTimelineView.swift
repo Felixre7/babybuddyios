@@ -1,8 +1,8 @@
 import SwiftUI
 import SwiftData
 
-/// A focused slice of the timeline for one activity kind: a single day, pushed from a Dashboard
-/// "Today" tile, or every cached record, pushed from a Latest row. Renders the same rail rows as the full ``TimelineView`` but is locked to one
+/// A focused, single-day slice of the timeline for one activity kind, pushed from a Dashboard
+/// "Today" tile. Renders the same rail rows as the full ``TimelineView`` but is locked to one
 /// kind on one day, with no filter/search/child-switch chrome. Reads from the local cache.
 struct DayTimelineView: View {
     @Environment(SyncEngine.self) private var sync
@@ -10,8 +10,8 @@ struct DayTimelineView: View {
 
     let kind: EntityKind
     let childID: Int
-    /// The day to scope to. Defaults to today; nil lists everything in the local cache.
-    let day: Date?
+    /// The day to scope to. Defaults to today; a parameter so it stays testable/previewable.
+    let day: Date
 
     /// This child's events of the scoped kind on the scoped day, newest first — filtered
     /// store-side so the view never materializes the whole table.
@@ -22,13 +22,12 @@ struct DayTimelineView: View {
     @State private var editing: LocalEntity?
     @State private var adding = false
 
-    init(kind: EntityKind, childID: Int, day: Date? = .now) {
+    init(kind: EntityKind, childID: Int, day: Date = .now) {
         self.kind = kind
         self.childID = childID
         self.day = day
-        let dayStart = day.map { Calendar.current.startOfDay(for: $0) } ?? .distantPast
-        let dayEnd = day == nil ? Date.distantFuture
-            : Calendar.current.date(byAdding: .day, value: 1, to: dayStart) ?? .distantFuture
+        let dayStart = Calendar.current.startOfDay(for: day)
+        let dayEnd = Calendar.current.date(byAdding: .day, value: 1, to: dayStart) ?? day
         let kindRaw = kind.rawValue
         let pendingDelete = SyncState.pendingDelete.rawValue
         let predicate = #Predicate<LocalEntity> { entity in
@@ -105,7 +104,6 @@ struct DayTimelineView: View {
     }
 
     private var title: String {
-        guard let day else { return "\(kind.displayName) · All" }
         let when = Calendar.current.isDateInToday(day)
             ? "Today"
             : day.formatted(.dateTime.month(.abbreviated).day())
@@ -116,8 +114,7 @@ struct DayTimelineView: View {
         ContentUnavailableView(
             "No \(kind.displayName)",
             systemImage: kind.systemImage,
-            description: Text(day == nil ? "Nothing logged yet."
-                              : "No \(kind.displayName.lowercased()) logged for this day."))
+            description: Text("No \(kind.displayName.lowercased()) logged for this day."))
     }
 
     // MARK: Mutations

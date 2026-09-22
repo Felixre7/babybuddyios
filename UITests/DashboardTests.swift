@@ -47,16 +47,20 @@ final class DashboardTests: UITestCase {
         expect(element(labeled: "Medication, Tylenol"))
     }
 
-    /// A Latest row opens that kind's full local history, not its editor: every cached sleep,
-    /// beyond today's.
-    func testLatestRowOpensKindHistory() {
+    /// A Latest row opens the Timeline filtered to its kind, not the record's editor: every
+    /// cached sleep, grouped by day, and nothing else.
+    func testLatestRowOpensFilteredTimeline() {
         launch()
         tap(element(labeled: "Sleep, "))
-        let all = expect(app.navigationBars["Sleep · All"])
-        XCTAssertGreaterThan(elements("label BEGINSWITH 'Sleep, '").count, 1)
+        expect(app.navigationBars["Timeline"])
         XCTAssertFalse(app.navigationBars["Edit Sleep"].exists)
-        tap(all.buttons.firstMatch) // back
-        expect(element(labeled: "Feedings, "))
+        XCTAssertGreaterThan(elements("label BEGINSWITH 'Sleep, '").count, 1)
+        XCTAssertEqual(elements("label BEGINSWITH 'Feeding, '").count, 0, "Only sleep passes the filter")
+
+        tap(app.buttons["Filters"])
+        tap(app.buttons["Clear Filters"])
+        tap(app.navigationBars["Filters"].buttons["Done"])
+        expect(elements("label BEGINSWITH 'Feeding, '").firstMatch)
     }
 
     /// The three support surfaces, each forced onto the Dashboard by `BB_NUDGE` rather than by
