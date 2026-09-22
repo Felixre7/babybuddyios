@@ -29,6 +29,24 @@ final class DashboardTests: UITestCase {
         expect(app.navigationBars["Feeding · Today"])
     }
 
+    /// Latest shows the newest record of every kind, occasional ones included: the seeded note and
+    /// weigh-in, and a dose as soon as it is logged.
+    func testLatestShowsEveryKind() {
+        launch()
+        expect(element(labeled: "Note, Looking out at the garden."))
+        expect(element(labeled: "Weight, 5.4"))
+        XCTAssertFalse(element(labeled: "Medication, ").exists)
+
+        openEditor("Medication")
+        let bar = expect(app.navigationBars["New Medication"])
+        let name = app.textFields["Name"]
+        name.tap()
+        name.typeText("Tylenol")
+        tap(bar.buttons["Save"])
+        expectGone(bar)
+        expect(element(labeled: "Medication, Tylenol"))
+    }
+
     /// The three support surfaces, each forced onto the Dashboard by `BB_NUDGE` rather than by
     /// aging an install a week (#59). Every one of them takes no for an answer, and the milestone's
     /// ask opens the supporter sheet.

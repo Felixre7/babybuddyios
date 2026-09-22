@@ -75,7 +75,10 @@ struct DashboardView: View {
 
     private let columns = [GridItem(.flexible(), spacing: 9), GridItem(.flexible(), spacing: 9)]
 
-    private let recentKinds: [EntityKind] = [.feeding, .change, .sleep, .tummyTime, .pumping]
+    /// Latest shows the newest record of each of these, however old it is.
+    private let recentKinds: [EntityKind] = [.feeding, .change, .sleep, .tummyTime, .pumping,
+                                             .medication, .note, .weight, .height,
+                                             .headCircumference, .temperature, .bmi]
 
     init(selectedChildID: Binding<Int>) {
         _selectedChildID = selectedChildID
