@@ -58,6 +58,18 @@ final class NotificationTests: UITestCase {
         tap(app.navigationBars.buttons.firstMatch)
         expect(app.buttons.labeled("Forgotten timer alerts, Off"))
 
+        // A second visit shows the picks, not the values from before the first: the screen used
+        // to keep the thresholds it was built with until the app was relaunched.
+        tap(app.buttons.labeled("Forgotten timer alerts, Off"))
+        expect(alerts)
+        alerts.tap()
+        expect(app.buttons["45m"])
+        expect(app.buttons["24h"])
+        alerts.tap()
+        expectValue(alerts, "0")
+        tap(app.navigationBars.buttons.firstMatch)
+        expect(app.buttons.labeled("Forgotten timer alerts, Off"))
+
         // The medication switch is its own, and doesn't bring the threshold rows with it.
         let doses = app.switches["Medication reminders"]
         tap(doses)
