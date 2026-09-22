@@ -21,7 +21,12 @@ struct DashboardView: View {
     /// target a timer belonging to any child). Rebuilt on child switch via `init`.
     @Query private var allEntities: [LocalEntity]
     /// Navigation path for the day-timeline pushes (in-app "Today" tiles + the status widget).
-    @State private var navPath: [EntityKind] = []
+    /// A pushed kind timeline: one day (a "Today" tile) or every local record (a Latest row).
+    struct KindDestination: Hashable {
+        let kind: EntityKind
+        let day: Date?
+    }
+    @State private var navPath: [KindDestination] = []
     @State private var addKind: EntityKind?
     @State private var editing: LocalEntity?
     /// A dose whose reminder was tapped: the editor opens a new dose pre-filled from it.
@@ -124,8 +129,8 @@ struct DashboardView: View {
             }
             .background(BBColor.surface)
             .navigationBarTitleDisplayMode(.inline)
-            .navigationDestination(for: EntityKind.self) { kind in
-                DayTimelineView(kind: kind, childID: selectedChildID)
+            .navigationDestination(for: KindDestination.self) { dest in
+                DayTimelineView(kind: dest.kind, childID: selectedChildID, day: dest.day)
             }
             .overlay(alignment: .bottom) {
                 UndoToastView().padding(.bottom, 84) // clear of the floating add button
@@ -468,7 +473,7 @@ struct DashboardView: View {
     /// Wrap a "Today" tile so tapping it pushes a single-day, single-kind timeline slice.
     private func metricLink<Content: View>(_ kind: EntityKind,
                                            @ViewBuilder _ tile: () -> Content) -> some View {
-        NavigationLink(value: kind) { tile() }
+        NavigationLink(value: KindDestination(kind: kind, day: .now)) { tile() }
             .buttonStyle(.plain)
     }
 
@@ -523,7 +528,9 @@ struct DashboardView: View {
             SectionHeader("Latest")
             VStack(spacing: 9) {
                 ForEach(latestEvents) { entity in
-                    Button { editing = entity } label: { EventRow(entity: entity) }
+                    Button {
+                        navPath = [KindDestination(kind: entity.kind, day: nil)]
+                    } label: { EventRow(entity: entity) }
                         .buttonStyle(.plain)
                 }
             }
@@ -563,7 +570,7 @@ struct DashboardView: View {
     /// "Today" tiles).
     private func openDay(_ kind: EntityKind?) {
         guard let kind else { return }
-        navPath = [kind]
+        navPath = [KindDestination(kind: kind, day: .now)]
         router.openDayKind = nil
     }
 

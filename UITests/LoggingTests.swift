@@ -122,8 +122,11 @@ final class LoggingTests: UITestCase {
         tap(bar.buttons["Cancel"])
         expectGone(bar)
 
-        // The seeded latest feeding: breast milk, left breast (#25).
+        // The seeded latest feeding: breast milk, left breast (#25). A Latest row opens the
+        // kind's history; the record's row there opens the editor.
         tap(app.buttons.labeled("Feeding, Breast Milk"))
+        expect(app.navigationBars["Feeding · All"])
+        tap(elements("label BEGINSWITH 'Feeding, Breast Milk'").firstMatch)
         expect(app.navigationBars["Edit Feeding"])
         XCTAssertTrue(app.buttons["Breast"].isSelected, "The editor should open pre-filled")
         XCTAssertTrue(app.buttons.labeled("Left Breast").exists)
