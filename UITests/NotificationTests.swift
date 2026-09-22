@@ -30,11 +30,25 @@ final class NotificationTests: UITestCase {
         expect(app.staticTexts["ALERT AFTER"])
         for row in rows { expect(app.staticTexts[row]) }
 
-        // Each row's menu holds the choices, and picking one sticks. Tummy time is the only
-        // activity whose default threshold is an hour, so its menu button names itself.
+        // Each row's menu holds the choices, and picking one redraws the row at once — it used
+        // to hold the old value until the screen was reopened. Tummy time is the only activity
+        // whose default threshold is an hour, so its menu button names itself. Its list runs
+        // from 10 minutes to 4 hours; sleep's row (12h by default) still offers a day.
         tap(app.buttons["1h"])
-        tap(app.buttons["4h"])
-        expect(app.buttons["4h"])
+        XCTAssertTrue(app.buttons["10m"].exists, "Ten minutes is offered for tummy time")
+        XCTAssertEqual(app.buttons.matching(identifier: "12h").count, 1, "Only sleep's own row says 12h; the tummy menu doesn't offer it")
+        tap(app.buttons["10m"])
+        expect(app.buttons["10m"])
+        expectGone(app.buttons["1h"])
+        tap(app.buttons["10m"])
+        tap(app.buttons["45m"])
+        expect(app.buttons["45m"])
+        expectGone(app.buttons["10m"])
+        tap(app.buttons["12h"])
+        expect(app.buttons["24h"])
+        tap(app.buttons["24h"])
+        expect(app.buttons["24h"])
+        expectGone(app.buttons["12h"])
 
         alerts.tap()
         expectValue(alerts, "0")

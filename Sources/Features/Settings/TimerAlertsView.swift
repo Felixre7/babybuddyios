@@ -5,6 +5,11 @@ import SwiftUI
 /// Settings pushed everything below them off the page.
 struct TimerAlertsView: View {
     @AppStorage(ForgottenTimerPolicy.enabledKey, store: SharedDefaults.suite) private var enabled = false
+    /// The thresholds live in the App Group, which SwiftUI can't observe through
+    /// `ForgottenTimerPolicy.threshold(for:)` — a pick never redrew the row. This mirror is what
+    /// the rows read; `threshold(_:)` writes both.
+    @State private var thresholds: [TimerActivity: TimeInterval] = Dictionary(
+        uniqueKeysWithValues: TimerActivity.allCases.map { ($0, ForgottenTimerPolicy.threshold(for: $0)) })
 
     var body: some View {
         ScrollView {
@@ -36,13 +41,13 @@ struct TimerAlertsView: View {
                                                 title: activity.timerName) {
                                         Menu {
                                             Picker(activity.timerName, selection: threshold(activity)) {
-                                                ForEach(ForgottenTimerPolicy.choices, id: \.self) {
+                                                ForEach(ForgottenTimerPolicy.choices(for: activity), id: \.self) {
                                                     Text(EntityFormatting.formatInterval($0)).tag($0)
                                                 }
                                             }
                                         } label: {
                                             HStack(spacing: 4) {
-                                                Text(EntityFormatting.formatInterval(ForgottenTimerPolicy.threshold(for: activity)))
+                                                Text(EntityFormatting.formatInterval(thresholds[activity] ?? ForgottenTimerPolicy.threshold(for: activity)))
                                                     .font(.subheadline.weight(.medium))
                                                     .foregroundStyle(BBColor.brandAccent)
                                                 Image(systemName: "chevron.up.chevron.down")
@@ -75,8 +80,9 @@ struct TimerAlertsView: View {
 
     private func threshold(_ activity: TimerActivity) -> Binding<TimeInterval> {
         Binding(
-            get: { ForgottenTimerPolicy.threshold(for: activity) },
+            get: { thresholds[activity] ?? ForgottenTimerPolicy.threshold(for: activity) },
             set: { seconds in
+                thresholds[activity] = seconds
                 SharedDefaults.suite.set(seconds, forKey: ForgottenTimerPolicy.thresholdKey(activity))
                 Task { await LocalAlerts.shared.reconcile() }
             })

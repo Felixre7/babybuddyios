@@ -13,8 +13,15 @@ enum ForgottenTimerPolicy {
         return SharedDefaults.suite.bool(forKey: enabledKey)
     }
 
-    /// The threshold choices Settings offers, in seconds.
-    static let choices: [TimeInterval] = [1800, 3600, 7200, 14_400, 28_800, 43_200, 86_400]
+    /// The threshold choices Settings offers for an activity, in seconds. Sleep runs to a day;
+    /// a feeding, pumping or tummy-time timer past 4 hours has already filed a bogus record, so
+    /// those stop there and start at 10 minutes instead.
+    static func choices(for activity: TimerActivity?) -> [TimeInterval] {
+        switch activity {
+        case .sleep, nil: return [1800, 3600, 7200, 14_400, 28_800, 43_200, 86_400]
+        case .feeding, .pumping, .tummyTime: return [600, 900, 1800, 2700, 3600, 7200, 14_400]
+        }
+    }
 
     static func thresholdKey(_ activity: TimerActivity) -> String { "forgottenTimerThreshold.\(activity.rawValue)" }
 
@@ -36,8 +43,10 @@ enum ForgottenTimerPolicy {
         }
         #endif
         guard let activity else { return defaultThreshold(nil) }
+        // A value Settings no longer offers (8/12/24 h left the non-sleep lists in 1.1.0) falls
+        // back to the default rather than lingering where the picker can't show it.
         let stored = SharedDefaults.suite.double(forKey: thresholdKey(activity))
-        return stored > 0 ? stored : defaultThreshold(activity)
+        return choices(for: activity).contains(stored) ? stored : defaultThreshold(activity)
     }
 
     struct Request: Equatable {

@@ -40,7 +40,19 @@ final class ForgottenTimerAlertTests: XCTestCase {
         XCTAssertEqual(ForgottenTimerPolicy.defaultThreshold(.sleep), 43_200)
         XCTAssertEqual(ForgottenTimerPolicy.defaultThreshold(.feeding), 7200)
         XCTAssertEqual(ForgottenTimerPolicy.defaultThreshold(.tummyTime), 3600)
-        XCTAssertTrue(ForgottenTimerPolicy.choices.contains(ForgottenTimerPolicy.defaultThreshold(nil)))
+        for activity in TimerActivity.allCases {
+            let choices = ForgottenTimerPolicy.choices(for: activity)
+            XCTAssertEqual(choices, choices.sorted())
+            XCTAssertTrue(choices.contains(ForgottenTimerPolicy.defaultThreshold(activity)),
+                          "\(activity) defaults to a threshold Settings can't show")
+        }
+        XCTAssertTrue(ForgottenTimerPolicy.choices(for: nil).contains(ForgottenTimerPolicy.defaultThreshold(nil)))
+        // Sleep keeps the long list; the other three run from 10 minutes to 4 hours.
+        XCTAssertEqual(ForgottenTimerPolicy.choices(for: .sleep).last, 86_400)
+        for activity in [TimerActivity.feeding, .pumping, .tummyTime] {
+            XCTAssertEqual(ForgottenTimerPolicy.choices(for: activity).first, 600, "\(activity) offers 10 minutes")
+            XCTAssertEqual(ForgottenTimerPolicy.choices(for: activity).last, 14_400, "\(activity) stops at 4 hours")
+        }
     }
 
     func testPlanSchedulesMissingMovedAndRemovesStale() {
