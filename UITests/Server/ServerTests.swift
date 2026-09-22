@@ -102,6 +102,62 @@ final class ServerTests: ServerTestCase {
         expect(app.staticTexts["All clear"])
     }
 
+    /// Another caregiver finishes an iOS-started timer while this app remains open. The card and
+    /// Live Activity must disappear without another Stop, pull-to-refresh, or foreground event.
+    func testTimerFinishedElsewhereDisappearsWhileForegrounded() async throws {
+        signIn()
+        tap(app.buttons["Add"])
+        tap(app.buttons["Start timer"])
+        let name = expect(app.textFields["Optional"])
+        name.tap()
+        name.typeText(marker)
+        tap(app.buttons["Sleep"])
+        tap(app.buttons["Start sleep timer"])
+        let runningCard = element(labeled: "\(marker) running")
+        expect(runningCard)
+
+        let timer = try await api.waitForRecord("timers", marker: marker)
+        let timerID = try XCTUnwrap(timer?["id"] as? Int)
+        let childID = try XCTUnwrap(timer?["child"] as? Int)
+        let start = try XCTUnwrap(timer?["start"] as? String)
+
+        // First prove this timer has a banner; a missing banner cannot make the later check pass.
+        let bannerTitle = springboard.otherElements["activity-content-view"].staticTexts
+            .matching(NSPredicate(format: "label ENDSWITH %@", marker)).firstMatch
+        pressHome()
+        openNotificationCenter()
+        expect(springboard.otherElements["lockscreen-date-view"])
+        expect(bannerTitle)
+        XCUIDevice.shared.press(.home)
+        app.activate()
+        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 15))
+        // Let the foreground-triggered pull finish BEFORE deleting the remote timer; otherwise
+        // that pull could hide the missing periodic refresh and make this regression pass.
+        tap(app.tabBars.buttons["Settings"])
+        let syncNow = expect(app.buttons.labeled("Sync now"))
+        expect(syncNow, matching: NSPredicate { object, _ in
+            (object as? XCUIElement)?.isEnabled == true
+        }, timeout: 60, describedAs: "to finish the foreground sync")
+        expect(app.staticTexts["All synced"])
+        tap(app.tabBars.buttons["Home"])
+        expect(runningCard)
+
+        // Match clients that preserve the stop time by saving an activity, then deleting the
+        // timer. Only this test's records are changed; the existing marker teardown owns cleanup.
+        try await api.create("sleep", ["child": childID, "start": start,
+                                     "end": Date().apiTime, "notes": marker])
+        try await api.delete("timers", id: timerID)
+        let deleted = try await api.waitForDeletion("timers", id: timerID)
+        XCTAssertTrue(deleted)
+
+        // No app interactions here: the foreground refresh must discover the remote deletion.
+        expectGone(runningCard, timeout: 90)
+        pressHome()
+        openNotificationCenter()
+        expect(springboard.otherElements["lockscreen-date-view"])
+        expectGone(bannerTitle)
+    }
+
     /// A record changed on the server while this device was editing it is a conflict, and "Keep my
     /// version" sends the device's copy (#16).
     func testServerEditRaisesConflict() async throws {

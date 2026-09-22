@@ -1,6 +1,7 @@
 import Foundation
 import SwiftData
 import Observation
+import WidgetKit
 
 /// Coordinates pull (server → cache) and, from Phase 4, push (cache → server) sync.
 /// Lives for the app's lifetime and is shared via the environment.
@@ -78,8 +79,13 @@ final class SyncEngine {
         // serverID (a multipart PATCH needs it).
         let uploads = await drainImageUploads()
         let pulledChanges = await pullAll()
-        // A dose or timer logged elsewhere reschedules its local notification, background syncs too.
-        if pulledChanges { await LocalAlerts.shared.reconcile() }
+        // Read the committed store AFTER the pull: a timer stopped on another device must also
+        // leave the Lock Screen and widgets. Foreground reconciliation can run before the pull,
+        // and a widget with a .never timeline otherwise keeps displaying its old snapshot.
+        // Reconcile even on partial failure: an earlier kind may already have committed changes.
+        // This also reconciles local dose/timer alerts through LiveActivityManager.
+        await LiveActivityManager().reconcile()
+        WidgetCenter.shared.reloadAllTimelines()
         let changed = push.delivered > 0 || uploads.delivered > 0 || pulledChanges
         // Only report a sync that actually did work — most syncs (foreground, pull-to-refresh,
         // after each timer action, background) are no-ops, which would otherwise be pure noise.

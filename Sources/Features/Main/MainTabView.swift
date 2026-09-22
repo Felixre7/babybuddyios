@@ -8,8 +8,11 @@ struct MainTabView: View {
     @Environment(DeepLinkRouter.self) private var router
     @Environment(AppSession.self) private var session
     @Environment(AppLockManager.self) private var lock
+    @Environment(\.scenePhase) private var scenePhase
     @Query(filter: #Predicate<LocalEntity> { $0.kindRaw == "child" }, sort: \.timestamp)
     private var children: [LocalEntity]
+    @Query(filter: #Predicate<LocalEntity> { $0.kindRaw == "timer" })
+    private var timers: [LocalEntity]
     // Stored in the App Group suite so the timer widget/intents target the same child.
     @AppStorage("selectedChildID", store: SharedDefaults.suite) private var selectedChildID = 0
     /// The marketing version whose What's New card has been seen on this device. App-local, not in
@@ -32,6 +35,19 @@ struct MainTabView: View {
         .task {
             await sync.sync()
             ensureValidSelection()
+        }
+        .task(id: scenePhase == .active && !lock.isLocked) {
+            guard scenePhase == .active && !lock.isLocked else { return }
+            // A ticking stopwatch only redraws cached time. Refresh while a timer is present.
+            // Backgrounding, locking, or signing out cancels this task.
+            while !Task.isCancelled {
+                do { try await Task.sleep(for: .seconds(60)) }
+                catch { return }
+                guard !Task.isCancelled else { return }
+                if timers.contains(where: { $0.syncState != .pendingDelete }) {
+                    await sync.sync()
+                }
+            }
         }
         .onChange(of: children.map(\.serverID)) { _, _ in ensureValidSelection() }
         .onChange(of: router.openTimerLocalID) { _, id in
