@@ -21,10 +21,12 @@ final class SmokeTests: UITestCase {
         }
 
         tap(app.tabBars.buttons["Settings"])
-        for section in ["SERVER", "NOTIFICATIONS", "QUICK LOG", "SUPPORT"] {
+        for section in ["SUPPORT THE APP", "SERVER", "NOTIFICATIONS", "QUICK LOG", "HELP"] {
             expect(app.staticTexts[section])
         }
         XCTAssertTrue(app.buttons.labeled("Sign out").exists)
+        // The build number sits at the foot of Settings, where a bug report's screenshot finds it.
+        XCTAssertTrue(app.staticTexts.labeled("Version 1.").exists)
     }
 
     /// Someone updating from a release older than the card itself has no version recorded, and

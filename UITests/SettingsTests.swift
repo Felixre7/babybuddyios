@@ -46,6 +46,21 @@ final class SettingsTests: UITestCase {
         expect(app.buttons.labeled("App Icon, Center Peek"))
     }
 
+    /// What's New sits with the supporter row, above the fold, and opens the same card Settings
+    /// always had — with Done, since nothing is being continued.
+    func testWhatsNewRowUnderSupporter() {
+        launch(["BB_START_TAB": "settings"])
+        let supporter = expect(app.buttons.labeled("Baby Buddy App Supporter"))
+        let whatsNew = expect(app.buttons.labeled("What's New"))
+        XCTAssertGreaterThan(whatsNew.frame.minY, supporter.frame.minY, "What's New is under the supporter row")
+        XCTAssertLessThan(whatsNew.frame.minY, app.staticTexts["SERVER"].frame.minY, "What's New is in Support the app")
+
+        tap(whatsNew)
+        expect(app.staticTexts["What's New"])
+        tap(app.buttons["Done"])
+        expectGone(app.staticTexts["Version 1.1.0"])
+    }
+
     /// The footer credit for upstream Baby Buddy — a licence obligation, not decoration (#46).
     func testAcknowledgements() {
         launch(["BB_START_TAB": "settings"])

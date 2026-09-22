@@ -162,6 +162,9 @@ struct WhatsNewView: View {
 
             Button {
                 Analytics.whatsNewSupporterTapped(source: source)
+                // Opening the supporter sheet from here takes the nudge policy's slot; the card
+                // on its own does not.
+                SupportNudgeStore.shared.snoozeNudges()
                 showingSupporter = true
             } label: {
                 Label("Support development", systemImage: "heart.fill")

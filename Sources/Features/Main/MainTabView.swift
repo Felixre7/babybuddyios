@@ -109,8 +109,6 @@ struct MainTabView: View {
             return
         }
         whatsNew = note
-        // The card carries its own support ask, so it takes the nudge policy's slot.
-        SupportNudgeStore.shared.snoozeNudges()
     }
 
     private static var initialTab: Int {
