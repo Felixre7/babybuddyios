@@ -6,13 +6,15 @@ import SwiftData
 struct MainTabView: View {
     @Environment(SyncEngine.self) private var sync
     @Environment(DeepLinkRouter.self) private var router
+    @Environment(AppSession.self) private var session
+    @Environment(AppLockManager.self) private var lock
     @Query(filter: #Predicate<LocalEntity> { $0.kindRaw == "child" }, sort: \.timestamp)
     private var children: [LocalEntity]
     // Stored in the App Group suite so the timer widget/intents target the same child.
     @AppStorage("selectedChildID", store: SharedDefaults.suite) private var selectedChildID = 0
     /// The marketing version whose What's New card has been seen on this device. App-local, not in
     /// the App Group suite: the widget has no use for it.
-    @AppStorage("lastWhatsNewVersion") private var lastWhatsNewVersion = ""
+    @AppStorage(ReleaseNotes.lastSeenKey) private var lastWhatsNewVersion = ""
     @State private var selectedTab = initialTab
     @State private var whatsNew: ReleaseNote?
 
@@ -49,6 +51,10 @@ struct MainTabView: View {
             SupporterSheet(source: .deeplink)
         }
         .onAppear { presentWhatsNewIfNeeded() }
+        // A cover presents above the lock screen, so a locked launch waits for the unlock.
+        .onChange(of: lock.isLocked) { _, locked in
+            if !locked { presentWhatsNewIfNeeded() }
+        }
         .fullScreenCover(item: $whatsNew) { note in
             WhatsNewView(note: note, source: .launch) {
                 lastWhatsNewVersion = ReleaseNotes.currentVersion
@@ -73,22 +79,29 @@ struct MainTabView: View {
     }
 
     /// Show the What's New card once per marketing version, and only to someone who was already
-    /// running an earlier one — a fresh install has onboarding to introduce the app, so it records
-    /// the version silently and starts showing cards from the next update. The version is written
-    /// when the card is dismissed, not here, so a crash on the way up doesn't swallow the release.
+    /// running an earlier one — a fresh install has onboarding to introduce the app, so signing in
+    /// records the version (`ReleaseNotes.markCurrentSeen`) and cards start from the next update.
+    /// Nothing recorded at all therefore means an update from a release older than the card
+    /// itself (1.0.x), which is shown it: 1.1.0 build 1 treated that as a fresh install, and the
+    /// first card never reached anyone. The version is written when the card is dismissed, not
+    /// here, so a crash on the way up doesn't swallow the release.
     private func presentWhatsNewIfNeeded() {
+        guard !lock.isLocked else { return }
+        let current = ReleaseNotes.currentVersion
         #if DEBUG
-        if ProcessInfo.processInfo.environment["BB_OPEN_WHATSNEW"] == "1" {
-            whatsNew = ReleaseNotes.note(for: ReleaseNotes.currentVersion) ?? ReleaseNotes.all().first
+        let environment = ProcessInfo.processInfo.environment
+        if environment["BB_OPEN_WHATSNEW"] == "1" {
+            whatsNew = ReleaseNotes.note(for: current) ?? ReleaseNotes.all().first
             return
         }
-        #endif
-        let current = ReleaseNotes.currentVersion
-        guard !current.isEmpty, lastWhatsNewVersion != current else { return }
-        guard !lastWhatsNewVersion.isEmpty else {
+        // Demo mode never signs in, so nothing stamps the version and every demo launch would
+        // look like that update. `BB_WHATSNEW_UPGRADE=1` asks for exactly that.
+        if session.isDemo, lastWhatsNewVersion.isEmpty, environment["BB_WHATSNEW_UPGRADE"] != "1" {
             lastWhatsNewVersion = current
             return
         }
+        #endif
+        guard !current.isEmpty, lastWhatsNewVersion != current else { return }
         // A release that shipped without a `whatsnew` block simply has nothing to say. Record it
         // rather than re-reading the file on every launch until the next release.
         guard let note = ReleaseNotes.note(for: current) else {

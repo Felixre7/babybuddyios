@@ -27,6 +27,29 @@ final class SmokeTests: UITestCase {
         XCTAssertTrue(app.buttons.labeled("Sign out").exists)
     }
 
+    /// Someone updating from a release older than the card itself has no version recorded, and
+    /// 1.1.0 build 1 took that for a fresh install: the first What's New card reached nobody. A
+    /// plain demo launch must still show none — every other test here would trip over it.
+    func testUpdateFromBeforeTheCardShowsWhatsNew() {
+        launch(["BB_WHATSNEW_UPGRADE": "1"])
+
+        expect(app.staticTexts["What's New"])
+        XCTAssertTrue(app.staticTexts.labeled("Version ").exists)
+        tap(app.buttons["Continue"])
+        expect(element(labeled: "Tummy time running"))
+        XCTAssertFalse(app.staticTexts["What's New"].exists)
+    }
+
+    /// A full-screen cover presents above the lock, so a locked launch holds the card back until
+    /// the unlock rather than putting it in front of Face ID.
+    func testWhatsNewWaitsBehindTheLock() {
+        launch(["BB_WHATSNEW_UPGRADE": "1", "BB_LOCK": "1"])
+
+        expect(element(labeled: "Baby Buddy is locked"))
+        XCTAssertFalse(app.staticTexts["What's New"].waitForExistence(timeout: 3),
+                       "The What's New card came up over the lock screen")
+    }
+
     /// The Face ID gate has to shut the app away from both hands and VoiceOver (#33). Nobody
     /// answers the automatic biometric prompt, so the lock stays up — which is the state to test.
     func testLockIsAModalBarrier() {

@@ -106,6 +106,8 @@ final class AppSession {
             if UserDefaults.standard.string(forKey: Self.cachedServerKey) != key { clearLocalData() }
             UserDefaults.standard.set(key, forKey: Self.cachedServerKey)
             KeychainStore.save(config: config)
+            // Before the state flips: `MainTabView` reads this as it appears.
+            ReleaseNotes.markCurrentSeen()
             state = .authenticated(config)
             client = probe
             return true
