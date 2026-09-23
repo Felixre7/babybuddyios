@@ -183,4 +183,26 @@ final class ListPagingTests: XCTestCase {
             XCTAssertEqual(error as? APIError, .decoding(Analytics.ListShape.nonJSON.rawValue))
         }
     }
+
+    /// Forward auth (Authentik, Authelia) redirects the token probe to its login page, which
+    /// URLSession follows to a 200. Sign-in has to fail there, not on the first sync.
+    func testALoginPageFailsTheTokenProbe() async {
+        let api = client(serving: ["<!DOCTYPE html><html><body>Sign in</body></html>"])
+        do {
+            try await api.validateToken()
+            XCTFail("a login page passed as the API")
+        } catch {
+            XCTAssertEqual(error as? APIError, .decoding(Analytics.ListShape.nonJSON.rawValue))
+        }
+    }
+
+    func testTheAPIRootPassesTheTokenProbe() async throws {
+        let api = client(serving: [#"{"children": "https://baby.example.com/api/children/"}"#])
+        try await api.validateToken()
+    }
+
+    func testANonJSONBodyNamesTheLoginProxy() {
+        let message = APIError.decoding(Analytics.ListShape.nonJSON.rawValue).userMessage
+        XCTAssertTrue(message.contains("/api/"), message)
+    }
 }

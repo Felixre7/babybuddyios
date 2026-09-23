@@ -227,10 +227,17 @@ final class APIClient {
     }
 
     /// Lightweight reachability + auth probe used during onboarding.
+    ///
+    /// A 2xx alone doesn't prove the API answered. A login proxy in front of it (Authentik or
+    /// Authelia forward auth) redirects to its sign-in page, which URLSession follows to a 200
+    /// HTML page. Without the JSON check sign-in succeeds and the first sync fails instead.
     @discardableResult
     func validateToken() async throws -> Bool {
         let req = try makeRequest(path: "", method: "GET")
-        _ = try await sendRaw(req)
+        let data = try await sendRaw(req)
+        guard (try? JSONSerialization.jsonObject(with: data)) != nil else {
+            throw APIError.decoding(Analytics.ListShape.nonJSON.rawValue)
+        }
         return true
     }
 
