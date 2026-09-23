@@ -18,12 +18,14 @@ struct ActivityTile: View {
     /// Set false in dense grids (the metric tiles) where a growing glyph would crowd out the
     /// label; the tile there is purely decorative, so keeping it compact costs nothing.
     var scalesWithType: Bool = true
+    /// Replaces the kind's activity color, as a medicine's own color does in sick mode.
+    var color: Color? = nil
 
     /// Growth is capped so the 2-column metric grid and the timeline rail don't blow out.
     private var scale: CGFloat { scalesWithType ? min(typeScale, 1.6) : 1 }
 
     var body: some View {
-        let color = BBColor.activity(kind)
+        let color = color ?? BBColor.activity(kind)
         let side = size * scale
         RoundedRectangle(cornerRadius: side * 0.29, style: .continuous)
             .fill(color.opacity(scheme == .dark ? 0.22 : 0.15))
@@ -366,4 +368,6 @@ extension ButtonStyle where Self == BBFilledButton {
     static var bbPrimary: BBFilledButton { BBFilledButton(background: BBColor.primary, foreground: .white) }
     /// Brand-tinted secondary action (soft blue fill, brand-accent label) — Connect / Try again.
     static var bbTinted: BBFilledButton { BBFilledButton(background: BBColor.brandTint, foreground: BBColor.brandAccent) }
+    /// Neutral gray fill with a primary label, for the quiet half of a pair such as "Not now".
+    static var bbNeutral: BBFilledButton { BBFilledButton(background: BBColor.controlFill, foreground: .primary) }
 }
