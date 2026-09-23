@@ -379,6 +379,8 @@ struct TimelineRailRow: View {
     let connectsDown: Bool
     let tagColors: [String: String]
     var blocked: Bool = false
+    /// Watched so a temperature redraws in a unit picked in Settings.
+    @AppStorage(TemperatureUnit.key, store: SharedDefaults.suite) private var unit: TemperatureUnit?
 
     var body: some View {
         HStack(alignment: .top, spacing: 9) {
@@ -418,7 +420,7 @@ struct TimelineRailRow: View {
                 VStack(alignment: .leading, spacing: 0) {
                     Text(EntityFormatting.title(entity))
                         .font(.subheadline.weight(.semibold))
-                    if let subtitle = EntityFormatting.subtitle(entity), !subtitle.isEmpty {
+                    if let subtitle = EntityFormatting.subtitle(entity, unit: unit ?? .region), !subtitle.isEmpty {
                         Text(subtitle)
                             .font(.caption).foregroundStyle(.secondary).lineLimit(1)
                             .padding(.top, 2)

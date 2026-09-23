@@ -6,7 +6,11 @@ enum EntityFormatting {
         entity.kind.displayName
     }
 
-    static func subtitle(_ entity: LocalEntity) -> String? {
+    static func subtitle(_ entity: LocalEntity) -> String? { subtitle(entity, unit: .current) }
+
+    /// `unit` is the phone's temperature unit; a row that watches the setting passes it, so it
+    /// redraws when the setting changes.
+    static func subtitle(_ entity: LocalEntity, unit: TemperatureUnit) -> String? {
         let p = entity.payloadObject
         switch entity.kind {
         case .feeding:
@@ -48,7 +52,6 @@ enum EntityFormatting {
         case .headCircumference:
             return (p["head_circumference"] as? Double).map { "\(trim($0))" }
         case .temperature:
-            let unit = TemperatureUnit.current
             return (p["temperature"] as? Double).map { unit.format(unit.reading($0)) }
         case .bmi:
             return (p["bmi"] as? Double).map { "\(trim($0))" }

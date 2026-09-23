@@ -153,6 +153,8 @@ struct MetricTile: View {
 /// A single recent event: tinted tile, title + detail, and an absolute-over-relative time.
 struct EventRow: View {
     let entity: LocalEntity
+    /// Watched so a temperature redraws in a unit picked in Settings.
+    @AppStorage(TemperatureUnit.key, store: SharedDefaults.suite) private var unit: TemperatureUnit?
 
     var body: some View {
         BBCard(cornerRadius: BBRadius.row, padding: 13) {
@@ -160,7 +162,7 @@ struct EventRow: View {
                 ActivityTile(kind: entity.kind, size: 40, glyph: 21)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(entity.kind.displayName).font(.subheadline.weight(.semibold))
-                    if let subtitle = EntityFormatting.subtitle(entity), !subtitle.isEmpty {
+                    if let subtitle = EntityFormatting.subtitle(entity, unit: unit ?? .region), !subtitle.isEmpty {
                         Text(subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                     }
                 }
