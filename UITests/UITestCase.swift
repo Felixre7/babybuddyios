@@ -143,6 +143,13 @@ class UITestCase: XCTestCase {
     /// permission prompts the app raises. None of them belong to the app's element tree.
     var springboard: XCUIApplication { XCUIApplication(bundleIdentifier: "com.apple.springboard") }
 
+    /// Answers the notification permission prompt, when the app raises one: turning an alert on
+    /// does, and so does sick mode with a fever, when its first temperature check is due.
+    func allowNotificationsIfAsked() {
+        let allow = springboard.buttons["Allow"]
+        if allow.waitForExistence(timeout: 5) { allow.tap() }
+    }
+
     /// Sends the app to the background, the way someone leaving the app does.
     ///
     /// The press is repeated rather than simply waited on for longer. A home press issued while the

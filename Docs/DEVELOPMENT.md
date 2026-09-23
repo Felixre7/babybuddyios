@@ -55,6 +55,8 @@ Pass these via `SIMCTL_CHILD_<NAME>` environment variables to `xcrun simctl laun
 | `BB_UITEST=1` | Start from a clean install: wipe the store, defaults, keychain and notifications first (seeding at once with `BB_DEMO`); no analytics or purchases. Every UI test launches with it |
 | `BB_SEED_CONFLICT=1` | Also seed a sample sync conflict (into an empty store) |
 | `BB_SEED_PENDING=1` | Also seed queued, blocked and photo changes for Pending Changes (into an empty store) |
+| `BB_SEED_SICK=1\|clear` | Also seed a day and a half of fever, two medicines, wet diapers and feeds, with sick mode on (into an empty store). `clear` moves the fever and doses 30 hours back, so Home asks to end sick mode |
+| `BB_TEMP_UNIT=c\|f` | Stand in for the region's temperature unit, until one is picked in Settings |
 | `BB_START_TAB=timeline\|trends\|settings` | Open on a specific tab |
 | `BB_OPEN=timer\|feeding\|change\|…` | Auto-present Start Timer or a new-entry editor |
 | `BB_OPEN_PENDING=1` / `BB_OPEN_CONFLICT=1` | Open Pending Changes / the first conflict from Settings |
