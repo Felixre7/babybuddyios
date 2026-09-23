@@ -21,6 +21,8 @@ enum BBColor {
     static let danger  = Color.adaptive(light: "A72431", dark: "E0727D") // delete
     static let info    = Color.adaptive(light: "44C4DD", dark: "5FC6DA")
     static let warning = stop
+    /// Amber text/icon accent for tinted contexts (a hint's glyph).
+    static let warningAccent = Color.adaptive(light: "9A6A00", dark: "E0A52F")
 
     // MARK: Activity color coding (glyph/accent per record type)
     static let feeding = Color.adaptive(light: "239556", dark: "6CC191")

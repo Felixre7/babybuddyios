@@ -66,6 +66,8 @@ struct EntityEditorView: View {
     @State private var pickedImageData: Data?
     // Measurement
     @State private var value = ""
+    /// Temperatures are typed, and saved, in the phone's unit.
+    private let unit = TemperatureUnit.current
     // Medication
     @State private var medName = ""
     @State private var dosage = ""
@@ -332,7 +334,10 @@ struct EntityEditorView: View {
             }
         case .temperature:
             BBCard(cornerRadius: BBRadius.tile) {
-                fieldLabeled("Temperature") { numericField(text: $value, unit: "°") }
+                VStack(alignment: .leading, spacing: 12) {
+                    fieldLabeled("Temperature") { numericField(text: $value, unit: unit.symbol) }
+                    unitHint
+                }
             }
         case .medication:
             medicationDetails
@@ -365,6 +370,43 @@ struct EntityEditorView: View {
                 rowDivider
                 colorRow
             }
+        }
+    }
+
+    /// A typed reading that the range rule would read as the other unit, with the value converted:
+    /// 101.3 on a °C phone is Fahrenheit. It's only advice, so Save still stores what was typed.
+    @ViewBuilder private var unitHint: some View {
+        if let typed = ActivityDraft.number(value), typed > 0, unit.unit(ofStored: typed) != unit {
+            let other = unit.unit(ofStored: typed)
+            let converted = unit.convert(typed, from: other)
+            let fever = SickMode.isFever(converted, line: SickMode.feverLine(in: unit))
+            VStack(spacing: 10) {
+                HStack(alignment: .top, spacing: 10) {
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(BBColor.warning.opacity(0.45))
+                        .frame(width: 26, height: 26)
+                        .overlay {
+                            Image(systemName: "exclamationmark.triangle")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(BBColor.warningAccent)
+                        }
+                    Text("\(value.trimmingCharacters(in: .whitespaces)) looks like \(other.name). In \(unit.name) that's \(TemperatureUnit.decimal(converted))°\(fever ? ", over your fever line." : ".")")
+                        .font(.system(size: 14))
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 0)
+                }
+                Button { value = TemperatureUnit.decimal(converted) } label: {
+                    Text("Use \(unit.format(converted))")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(BBColor.brandAccent)
+                        .frame(maxWidth: .infinity, minHeight: 40)
+                        .background(BBColor.card, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(12)
+            .background(BBColor.warning.opacity(scheme == .dark ? 0.16 : 0.18),
+                        in: RoundedRectangle(cornerRadius: BBRadius.control, style: .continuous))
         }
     }
 
@@ -734,6 +776,8 @@ struct EntityEditorView: View {
         for key in ["weight", "height", "head_circumference", "bmi", "temperature"] {
             if let v = p[key] as? Double { value = trimmed(v) }
         }
+        // A reading logged on a phone in the other unit opens in this one, as it's shown everywhere.
+        if let t = p["temperature"] as? Double, unit.unit(ofStored: t) != unit { value = trimmed(unit.reading(t)) }
     }
 
     private func save() {
