@@ -10,6 +10,9 @@ struct MainTabView: View {
     @Environment(AppLockManager.self) private var lock
     @Query(filter: #Predicate<LocalEntity> { $0.kindRaw == "child" }, sort: \.timestamp)
     private var children: [LocalEntity]
+    /// Every cached dose, for every child: medicine colors follow the order names first appear.
+    @Query(filter: #Predicate<LocalEntity> { $0.kindRaw == "medication" })
+    private var medications: [LocalEntity]
     // Stored in the App Group suite so the timer widget/intents target the same child.
     @AppStorage("selectedChildID", store: SharedDefaults.suite) private var selectedChildID = 0
     /// The marketing version whose What's New card has been seen on this device. App-local, not in
@@ -48,6 +51,9 @@ struct MainTabView: View {
         }
         .onChange(of: router.showTimelineKind) { _, kind in
             if kind != nil { selectedTab = 1 } // a Latest row targets the Timeline tab
+        }
+        .onChange(of: medications.map(\.payload), initial: true) { _, _ in
+            MedicineColorStore.shared.assign(medications)
         }
         .sheet(isPresented: Binding(get: { router.showSupporter },
                                     set: { router.showSupporter = $0 })) {

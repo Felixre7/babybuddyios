@@ -24,6 +24,18 @@ enum BBColor {
     /// Amber text/icon accent for tinted contexts (a hint's glyph).
     static let warningAccent = Color.adaptive(light: "9A6A00", dark: "E0A52F")
 
+    // MARK: Medicine colors (sick mode)
+    /// Handed out to medicines in this order: red (medication's own color), purple, pink, teal,
+    /// olive, slate. See `MedicineColor`.
+    static let medicine: [Color] = [
+        .adaptive(light: "A72431", dark: "E0727D"),
+        .adaptive(light: "6B4FB8", dark: "A993E6"),
+        .adaptive(light: "C23B7A", dark: "E77BB5"),
+        .adaptive(light: "0E7C74", dark: "4FC9C1"),
+        .adaptive(light: "6B7A12", dark: "B9C45A"),
+        .adaptive(light: "56657A", dark: "9AA7BA"),
+    ]
+
     // MARK: Activity color coding (glyph/accent per record type)
     static let feeding = Color.adaptive(light: "239556", dark: "6CC191")
     static let sleep   = Color.adaptive(light: "4A5DB0", dark: "9AA8E0")

@@ -151,7 +151,8 @@ enum MedicationReminderPolicy {
         return (dose, next)
     }
 
-    private static func normalizedName(_ name: String?) -> String {
+    /// How doses are matched to one medicine: trimmed and case-insensitive.
+    static func normalizedName(_ name: String?) -> String {
         (name ?? "").trimmingCharacters(in: .whitespaces).lowercased()
     }
 
