@@ -183,6 +183,17 @@ final class SickModeTests: XCTestCase {
         XCTAssertEqual(store[1].dismissedReading, newest)
     }
 
+    // MARK: Temperature check
+
+    func testTemperatureCheckFollowsTheReadingByTheCadence() {
+        let fever = reading(100.8, hoursAgo: 1)
+        let request = TemperatureCheckPolicy.request(for: fever, value: "100.8°F", childName: "Maya", hours: 3)
+        XCTAssertEqual(request.id, "temperature-\(fever.localID.uuidString)")
+        XCTAssertEqual(request.fireDate, hours(1).addingTimeInterval(3 * 3600))
+        XCTAssertEqual(request.title, "Temperature check")
+        XCTAssertEqual(request.body, "It's been 3 hr since Maya's last reading (100.8°F).")
+    }
+
     func testDurationsReadLikeACountdown() {
         XCTAssertEqual(SickMode.duration(4192), "1 hr 10 min") // 1:09:52 rounds up
         XCTAssertEqual(SickMode.duration(21_600), "6 hr")
