@@ -16,13 +16,19 @@ struct InsightsView: View {
     @Query(filter: #Predicate<LocalEntity> { $0.kindRaw == "child" }, sort: \.timestamp)
     private var children: [LocalEntity]
     @State private var period: ChartPeriod = .week
+    @State private var colors = MedicineColorStore.shared
+    // Watched so the temperature card follows Settings ▸ Sick mode; the keys and defaults are the
+    // ones ``SickMode`` reads.
+    @AppStorage(TemperatureUnit.key, store: SharedDefaults.suite) private var storedUnit: TemperatureUnit?
+    @AppStorage(SickMode.feverLineKey, store: SharedDefaults.suite) private var feverLineCelsius = SickMode.defaultFeverLine
 
     private let aggregator = ChartAggregator()
 
     init(selectedChildID: Binding<Int>) {
         _selectedChildID = selectedChildID
         let child = selectedChildID.wrappedValue
-        let kinds = [EntityKind.sleep, .feeding, .change, .tummyTime, .pumping].map(\.rawValue)
+        let kinds = [EntityKind.sleep, .feeding, .change, .tummyTime, .pumping,
+                     .temperature, .medication].map(\.rawValue)
         let pendingDelete = SyncState.pendingDelete.rawValue
         let predicate = #Predicate<LocalEntity> { entity in
             entity.childID == child && kinds.contains(entity.kindRaw)
@@ -48,6 +54,7 @@ struct InsightsView: View {
                     diaperCard
                     tummyTimeCard
                     pumpingCard
+                    temperatureCard
                 }
                 .padding(.horizontal)
                 .padding(.top, 8)
@@ -264,6 +271,119 @@ struct InsightsView: View {
         }
     }
 
+    // MARK: Temperature
+
+    /// A sick spell as one picture (#79): every reading over the window, the fever line dashed
+    /// across it, and a marker where each dose was given in that medicine's color. Unlike the other
+    /// cards this one plots the records at their own times rather than a total per day. A fever is
+    /// read by its shape over hours, and the doses have to line up with it.
+    private var temperatureCard: some View {
+        let now = Date.now
+        let readings = aggregator.temperatures(chartEntities, childID: selectedChildID,
+                                               period: period, unit: unit, now: now)
+        let doses = aggregator.doses(chartEntities, childID: selectedChildID, period: period, now: now)
+        let peak = readings.max { $0.value < $1.value }
+        return ChartCard(title: "Temperature", icon: .temperature,
+                         summary: peak.map { "Peak \(unit.format($0.value))" }) {
+            if readings.isEmpty {
+                emptyChart("No temperatures logged")
+            } else {
+                VStack(alignment: .leading, spacing: 14) {
+                    Chart {
+                        ForEach(doses, id: \.localID) { dose in
+                            RuleMark(x: .value("Dose", dose.timestamp))
+                                .lineStyle(StrokeStyle(lineWidth: 1.5))
+                                .foregroundStyle(doseColor(dose).opacity(0.5))
+                                .accessibilityLabel(doseName(dose))
+                                .accessibilityValue(doseValue(dose))
+                        }
+                        RuleMark(y: .value("Fever", feverLine))
+                            .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 3]))
+                            .foregroundStyle(BBColor.danger.opacity(0.7))
+                            .accessibilityLabel("Fever line")
+                            .accessibilityValue(unit.format(feverLine))
+                        ForEach(readings, id: \.entity.localID) { reading in
+                            LineMark(
+                                x: .value("Time", reading.time),
+                                y: .value("Temperature", reading.value))
+                            .foregroundStyle(BBColor.brand)
+                            .symbol(.circle)
+                            .symbolSize(26)
+                            .accessibilityLabel(momentLabel(reading.time))
+                            .accessibilityValue(unit.format(reading.value))
+                        }
+                    }
+                    .chartYAxisLabel(unit.symbol)
+                    // Charts would otherwise anchor the axis at 0 and flatten a fever into a
+                    // straight line. The margins are the sick card's, so both read the same shape.
+                    .chartYScale(domain: temperatureDomain(readings))
+                    // No x scale of its own. The marks carry their own times and the period control
+                    // decides what's included, so a spell of hours fills the card as a fortnight
+                    // does. The labels follow the same way, clock times while it all fits in a day
+                    // and a half. Charts' own date labels carry both and clip to "Sep 22…".
+                    .chartXAxis {
+                        AxisMarks(values: .automatic(desiredCount: 4)) { value in
+                            AxisTick()
+                            AxisValueLabel {
+                                if let date = value.as(Date.self) {
+                                    Text(date.formatted(spansDays(readings, doses)
+                                        ? .dateTime.month(.abbreviated).day() : .dateTime.hour()))
+                                }
+                            }
+                        }
+                    }
+                    .frame(height: chartHeight)
+
+                    Text("Fever line at \(unit.format(feverLine))")
+                        .font(.caption).foregroundStyle(.secondary)
+                    ForEach(aggregator.doseTallies(doses)) { tally in
+                        HStack(spacing: 7) {
+                            Circle().fill(colors.color(tally.id).color).frame(width: 8, height: 8)
+                            Text(tally.name).font(.caption.weight(.medium))
+                            Text("\(tally.count) dose\(tally.count == 1 ? "" : "s")")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                        .accessibilityElement(children: .combine)
+                    }
+                }
+            }
+        }
+    }
+
+    private var unit: TemperatureUnit { storedUnit ?? .region }
+    private var feverLine: Double { unit.convert(feverLineCelsius, from: .celsius) }
+
+    /// Whether the marks reach over more than a day and a half, and so want dates on the x axis.
+    private func spansDays(_ readings: [SickMode.Reading], _ doses: [LocalEntity]) -> Bool {
+        let times = readings.map(\.time) + doses.map(\.timestamp)
+        guard let first = times.min(), let last = times.max() else { return false }
+        return last.timeIntervalSince(first) > 36 * 3600
+    }
+
+    /// The readings and the fever line, with room around them, over a span of at least two degrees
+    /// (one in °C) so a steady temperature isn't magnified into a mountain range.
+    private func temperatureDomain(_ readings: [SickMode.Reading]) -> ClosedRange<Double> {
+        let values = readings.map(\.value) + [feverLine]
+        let low = values.min()!, high = values.max()!
+        let span = max(high - low, unit == .fahrenheit ? 2 : 1.1)
+        return (low - span * 0.25)...(high + span * 0.15)
+    }
+
+    private func doseColor(_ dose: LocalEntity) -> Color {
+        colors.color(dose.payloadObject["name"] as? String ?? "").color
+    }
+
+    private func doseName(_ dose: LocalEntity) -> String {
+        let name = (dose.payloadObject["name"] as? String ?? "").trimmingCharacters(in: .whitespaces)
+        return name.isEmpty ? "Medication" : name
+    }
+
+    /// "5 mL, Jun 14 at 3:30 PM". A dose marker sits on no axis of its own, so it reads its time out.
+    private func doseValue(_ dose: LocalEntity) -> String {
+        [EntityFormatting.dosage(dose), momentLabel(dose.timestamp)]
+            .compactMap { $0 }.joined(separator: ", ")
+    }
+
     // MARK: Helpers
 
     private let chartHeight: CGFloat = 168
@@ -274,6 +394,11 @@ struct InsightsView: View {
 
     private func dayLabel(_ day: Date) -> String {
         day.formatted(.dateTime.month(.abbreviated).day())
+    }
+
+    /// "Jun 14 at 3:30 PM", for a mark that sits at a time rather than on a day.
+    private func momentLabel(_ date: Date) -> String {
+        "\(dayLabel(date)) at \(date.formatted(date: .omitted, time: .shortened))"
     }
 
     private func emptyChart(_ message: String) -> some View {

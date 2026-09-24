@@ -120,9 +120,27 @@ final class SmokeTests: UITestCase {
             let segment = app.buttons[period]
             tap(segment)
             XCTAssertTrue(segment.isSelected, "\(period) should read as selected")
-            for card in ["Sleep", "Feedings", "Diapers", "Tummy Time", "Pumping"] {
+            for card in ["Sleep", "Feedings", "Diapers", "Tummy Time", "Pumping", "Temperature"] {
                 XCTAssertTrue(app.staticTexts[card].exists, "\(card) card missing at \(period)")
             }
         }
+    }
+
+    /// The sick spell as one picture (#79): the temperature card's peak, the fever line it's read
+    /// against, and a tally of each medicine marked on it. `BB_SEED_SICK=1` seeds a day and a half
+    /// of fever stored in °F, on a phone the en_US launch locale puts in °F too.
+    func testTrendsTemperatureCard() throws {
+        launch(["BB_START_TAB": "trends", "BB_SEED_SICK": "1"])
+        allowNotificationsIfAsked()
+        expect(app.staticTexts["Temperature"])
+        expect(app.staticTexts["Peak 102.8°F"])
+        expect(app.staticTexts["Fever line at 100.4°F"])
+        for (medicine, doses) in [("Acetaminophen", 4), ("Ibuprofen", 2)] {
+            expect(elements("label BEGINSWITH '\(medicine)' AND label CONTAINS '\(doses) doses'")
+                .firstMatch)
+        }
+        // The one screen in the suite whose audit sees a chart with marks on it: eleven readings
+        // and six doses, each of which has to carry its own label and value.
+        try audit()
     }
 }
