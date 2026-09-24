@@ -156,7 +156,7 @@ jobs:
       matrix:
         include:
           - shard: logging
-            classes: LoggingTests
+            classes: LoggingTests SickModeTests
           - shard: timers
             classes: LiveActivityTests SmokeTests TimerTests
           - shard: timeline
