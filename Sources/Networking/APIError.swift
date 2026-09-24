@@ -138,6 +138,8 @@ enum APIError: Error, Equatable {
         case .conflict: return "This record was changed on the server."
         case .server(let status): return "Server error (\(status)). Please try again later."
         case .badRequest(_, let message, _): return message ?? "The server rejected the request."
+        case .decoding(Analytics.ListShape.nonJSON.rawValue):
+            return "The server answered with a web page instead of the Baby Buddy API. If a login proxy such as Authentik or Authelia is in front of it, let /api/ and /media/ through."
         case .decoding(let detail): return "Couldn't read the server response. \(detail)"
         case .invalidURL: return "The server address is not valid."
         }
