@@ -27,6 +27,9 @@ final class DeepLinkRouter {
     /// the Timeline has applied it.
     var showTimelineKind: EntityKind?
 
+    /// Set by sick mode's "See all": open the Timeline tab as it is. Cleared once switched.
+    var showTimeline = false
+
     /// Set when a medication reminder is tapped: the dose whose next dose is now OK, to log the
     /// next one from. Cleared once handled.
     var repeatDoseLocalID: UUID?

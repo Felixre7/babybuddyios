@@ -98,6 +98,7 @@ final class AnalyticsSignalTests: XCTestCase {
         XCTAssertEqual(Analytics.ActivitySource.repeat.rawValue, "repeat")
         XCTAssertEqual(Analytics.ActivitySource.timerStop.rawValue, "timerStop")
         XCTAssertEqual(Analytics.ActivitySource.intent.rawValue, "intent")
+        XCTAssertEqual(Analytics.ActivitySource.sickMode.rawValue, "sickMode")
     }
 
     /// The Trends tab is parameterized by exactly one thing, and the period must arrive as the plain
@@ -321,6 +322,75 @@ final class AnalyticsSignalTests: XCTestCase {
         Analytics.serverEndpointMissing("tags")
         XCTAssertEqual(recorder.names, ["Server.endpointMissing", "Server.endpointMissing"])
         XCTAssertEqual(recorder.signals.map { $0.parameters["endpoint"] }, ["pumping", "tags"])
+    }
+
+    // MARK: - Sick mode
+
+    /// Only which way it was turned on or off: nothing about the child, the readings, or how long.
+    func testSickModeStartAndEndCarryOnlyTheirSource() {
+        Analytics.sickModeStarted(source: .addSheet)
+        Analytics.sickModeEnded(source: .endPrompt)
+        XCTAssertEqual(recorder.parameters("SickMode.started"), ["source": "addSheet"])
+        XCTAssertEqual(recorder.parameters("SickMode.ended"), ["source": "endPrompt"])
+    }
+
+    func testEverySickModeSourceIsSpelledAsExpected() {
+        XCTAssertEqual(Analytics.SickModeStart.allCases.map(\.rawValue), ["banner", "addSheet", "settings"])
+        XCTAssertEqual(Analytics.SickModeEnd.allCases.map(\.rawValue), ["endPrompt", "home", "settings"])
+    }
+
+    /// The banner and prompt signals are counts, so they carry nothing at all.
+    func testSickModeBannerAndPromptSignalsCarryNothing() {
+        Analytics.sickModeBannerShown()
+        Analytics.sickModeBannerDismissed()
+        Analytics.sickModeEndPromptShown()
+        Analytics.sickModeKeptOn()
+        Analytics.sickModeEndUndone()
+        XCTAssertEqual(recorder.names, ["SickMode.bannerShown", "SickMode.bannerDismissed",
+                                        "SickMode.endPromptShown", "SickMode.keptOn", "SickMode.endUndone"])
+        XCTAssertTrue(recorder.signals.allSatisfy { $0.parameters.isEmpty })
+    }
+
+    /// Home redraws, tab switches and relaunches all bring the banner back on screen; only a new
+    /// reading is a new banner.
+    @MainActor
+    func testBannerIsCountedOncePerReading() {
+        let defaults = UserDefaults(suiteName: "AnalyticsSickMode-\(UUID())")!
+        let store = SickModeStore(defaults: defaults)
+        let first = UUID(), second = UUID()
+        store.countBanner(1, reading: first)
+        store.countBanner(1, reading: first)
+        store.countBanner(1, reading: second)
+        SickModeStore(defaults: defaults).countBanner(1, reading: second) // after a relaunch
+        XCTAssertEqual(recorder.names, ["SickMode.bannerShown", "SickMode.bannerShown"])
+    }
+
+    /// The prompt appears once after the start and again after each "Keep it on" runs out.
+    @MainActor
+    func testEndPromptIsCountedOncePerAppearance() {
+        let store = SickModeStore(defaults: UserDefaults(suiteName: "AnalyticsSickMode-\(UUID())")!)
+        store.start(1, at: .now.addingTimeInterval(-3 * 86_400))
+        store.countEndPrompt(1)
+        store.countEndPrompt(1)
+        store.keepOn(1, until: .now.addingTimeInterval(-60))
+        store.countEndPrompt(1)
+        XCTAssertEqual(recorder.names, ["SickMode.endPromptShown", "SickMode.endPromptShown"])
+    }
+
+    /// Undo on "Sick mode ended" restores the same start, and counts as an undo, not a new start.
+    @MainActor
+    func testUndoingAnEndIsNotAStart() throws {
+        let store = SickModeStore(defaults: UserDefaults(suiteName: "AnalyticsSickMode-\(UUID())")!)
+        let container = LocalStore.makeContainer(inMemory: true)
+        let context = container.mainContext
+        let startedAt = Date.now.addingTimeInterval(-3600)
+        store.turnOn(1, at: startedAt, source: .settings)
+        store.turnOff(1, source: .home, in: context)
+        UndoToastCenter.shared.undo(in: context)
+        XCTAssertEqual(store[1].startedAt, startedAt)
+        XCTAssertEqual(recorder.names, ["SickMode.started", "SickMode.ended", "SickMode.endUndone"])
+        XCTAssertEqual(recorder.parameters("SickMode.started"), ["source": "settings"])
+        XCTAssertEqual(recorder.parameters("SickMode.ended"), ["source": "home"])
     }
 }
 #endif

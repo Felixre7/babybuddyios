@@ -6,7 +6,11 @@ enum EntityFormatting {
         entity.kind.displayName
     }
 
-    static func subtitle(_ entity: LocalEntity) -> String? {
+    static func subtitle(_ entity: LocalEntity) -> String? { subtitle(entity, unit: .current) }
+
+    /// `unit` is the phone's temperature unit; a row that watches the setting passes it, so it
+    /// redraws when the setting changes.
+    static func subtitle(_ entity: LocalEntity, unit: TemperatureUnit) -> String? {
         let p = entity.payloadObject
         switch entity.kind {
         case .feeding:
@@ -48,17 +52,11 @@ enum EntityFormatting {
         case .headCircumference:
             return (p["head_circumference"] as? Double).map { "\(trim($0))" }
         case .temperature:
-            return (p["temperature"] as? Double).map { "\(trim($0))°" }
+            return (p["temperature"] as? Double).map { unit.format(unit.reading($0)) }
         case .bmi:
             return (p["bmi"] as? Double).map { "\(trim($0))" }
         case .medication:
-            var parts: [String] = []
-            if let n = p["name"] as? String { parts.append(n) }
-            if let dose = p["dosage"] as? Double {
-                let unit = p["dosage_unit"] as? String ?? ""
-                parts.append("\(trim(dose)) \(unit)".trimmingCharacters(in: .whitespaces))
-            }
-            return parts.joined(separator: " · ")
+            return [p["name"] as? String, dosage(entity)].compactMap { $0 }.joined(separator: " · ")
         case .child:
             return nil
         }
@@ -91,6 +89,13 @@ enum EntityFormatting {
     // MARK: Helpers
 
     static func formatAmount(_ value: Double) -> String { "\(trim(value)) ml" }
+
+    /// A dose's amount and unit, "5 mL", or `nil` when it has no dosage.
+    static func dosage(_ entity: LocalEntity) -> String? {
+        let p = entity.payloadObject
+        guard let dose = p["dosage"] as? Double else { return nil }
+        return "\(trim(dose)) \(p["dosage_unit"] as? String ?? "")".trimmingCharacters(in: .whitespaces)
+    }
 
     private static func trim(_ value: Double) -> String {
         value == value.rounded() ? String(Int(value)) : String(format: "%.1f", value)

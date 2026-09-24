@@ -151,7 +151,8 @@ enum MedicationReminderPolicy {
         return (dose, next)
     }
 
-    private static func normalizedName(_ name: String?) -> String {
+    /// How doses are matched to one medicine: trimmed and case-insensitive.
+    static func normalizedName(_ name: String?) -> String {
         (name ?? "").trimmingCharacters(in: .whitespaces).lowercased()
     }
 
@@ -172,11 +173,29 @@ enum MedicationReminderPolicy {
     }
 }
 
-/// Keeps the app's local notifications — forgotten-timer alerts and medication next-dose
-/// reminders — in step with the shared store. Mirrors ``LiveActivityManager``: one idempotent
-/// ``reconcile()`` that ``LiveActivityManager/reconcile()`` calls, so every timer start/stop/discard,
-/// editor save/delete and app foreground already covers it; ``SyncEngine`` adds a pull that
-/// brought changes (a dose logged on the web).
+/// While a child is in sick mode and their newest reading is over the fever line, one reminder to
+/// take the next reading, the check cadence after it. A newer reading replaces it.
+enum TemperatureCheckPolicy {
+    static func identifier(for reading: LocalEntity) -> String { "temperature-\(reading.localID.uuidString)" }
+
+    /// `value` is the reading as the phone shows it, "100.8°F".
+    static func request(for reading: LocalEntity, value: String, childName: String?,
+                        hours: Int) -> ForgottenTimerPolicy.Request {
+        let owner = childName.map { "\($0)'s" } ?? "the"
+        return ForgottenTimerPolicy.Request(
+            id: identifier(for: reading),
+            fireDate: reading.timestamp.addingTimeInterval(Double(hours) * 3600),
+            title: "Temperature check",
+            body: "It's been \(hours) hr since \(owner) last reading (\(value)).",
+            url: "babybuddy://home")
+    }
+}
+
+/// Keeps the app's local notifications in step with the shared store: forgotten-timer alerts,
+/// medication next-dose reminders and sick mode's temperature checks. Mirrors
+/// ``LiveActivityManager``: one idempotent ``reconcile()`` that ``LiveActivityManager/reconcile()``
+/// calls, so every timer start/stop/discard, editor save/delete and app foreground already covers
+/// it; ``SyncEngine`` adds a pull that brought changes (a dose logged on the web).
 @MainActor
 final class LocalAlerts {
     static let shared = LocalAlerts()
@@ -184,9 +203,13 @@ final class LocalAlerts {
 
     func reconcile() async {
         let timersOn = ForgottenTimerPolicy.isEnabled, dosesOn = MedicationReminderPolicy.isEnabled
+        let checksOn = SickMode.checkHours > 0 && !SickModeStore.shared.active.isEmpty
+        let wanted = timersOn || dosesOn || checksOn ? wantedRequests() : (timers: [], doses: [], checks: [])
         // The setting can arrive on before permission was ever asked (a restored App Group
-        // default); ask now rather than schedule alerts that can never show.
-        if timersOn || dosesOn, await center.notificationSettings().authorizationStatus == .notDetermined {
+        // default); ask now rather than schedule alerts that can never show. Temperature checks are
+        // on by default, so they ask the first time one is due: sick mode on, with a fever.
+        if timersOn || dosesOn || !wanted.checks.isEmpty,
+           await center.notificationSettings().authorizationStatus == .notDetermined {
             _ = await requestAuthorization()
         }
         let pending = Dictionary(uniqueKeysWithValues: await center.pendingNotificationRequests()
@@ -196,12 +219,12 @@ final class LocalAlerts {
                 return (request.identifier, date)
             })
         let delivered = Set(await center.deliveredNotifications().map(\.request.identifier))
-        let wanted = timersOn || dosesOn ? wantedRequests() : (timers: [], doses: [])
 
-        // A dose reminder that is already overdue when first seen (an old dose, or the app opened
-        // long after) says nothing useful, so only timers fire late.
+        // A dose reminder or temperature check that is already overdue when first seen (an old
+        // dose, or the app opened long after) says nothing useful, so only timers fire late.
         for (prefix, requests, firesOverdue) in [("timer-", timersOn ? wanted.timers : [], true),
-                                                 ("medication-", dosesOn ? wanted.doses : [], false)] {
+                                                 ("medication-", dosesOn ? wanted.doses : [], false),
+                                                 ("temperature-", wanted.checks, false)] {
             let plan = ForgottenTimerPolicy.plan(wanted: requests, pending: pending, delivered: delivered,
                                                  prefix: prefix, firesOverdue: firesOverdue)
             center.removePendingNotificationRequests(withIdentifiers: plan.remove)
@@ -230,14 +253,15 @@ final class LocalAlerts {
         (try? await center.requestAuthorization(options: [.alert, .sound])) ?? false
     }
 
-    /// Every running timer, and the newest dose of each medication, in the shared store as wanted
-    /// requests. Opens its own container, like the Live Activity manager, so widget-started timers
-    /// are seen too.
-    private func wantedRequests() -> (timers: [ForgottenTimerPolicy.Request], doses: [ForgottenTimerPolicy.Request]) {
+    /// Every running timer, the newest dose of each medication, and the newest reading of each child
+    /// in sick mode, in the shared store as wanted requests. Opens its own container, like the Live
+    /// Activity manager, so widget-started timers are seen too.
+    private func wantedRequests() -> (timers: [ForgottenTimerPolicy.Request], doses: [ForgottenTimerPolicy.Request],
+                                      checks: [ForgottenTimerPolicy.Request]) {
         guard let container = try? ModelContainer(
             for: LocalStore.schema,
             configurations: ModelConfiguration(schema: LocalStore.schema, url: LocalStore.storeURL))
-        else { return ([], []) }
+        else { return ([], [], []) }
         let context = ModelContext(container)
         func fetch(_ kind: String) -> [LocalEntity] {
             (try? context.fetch(FetchDescriptor<LocalEntity>(predicate: #Predicate { $0.kindRaw == kind }))) ?? []
@@ -253,7 +277,17 @@ final class LocalAlerts {
         let doses = MedicationReminderPolicy.latestDoses(fetch("medication")).compactMap {
             MedicationReminderPolicy.request(for: $0, childName: firstName($0.childID))
         }
-        return (timers, doses)
+        let hours = SickMode.checkHours, sick = SickModeStore.shared.active
+        let unit = TemperatureUnit.current, line = SickMode.feverLine(in: unit)
+        let readings = hours == 0 || sick.isEmpty ? [] : fetch("temperature").filter { $0.syncState != .pendingDelete }
+        let checks = sick.keys.compactMap { child -> ForgottenTimerPolicy.Request? in
+            let newest = readings.filter { $0.childID == child }.max { $0.timestamp < $1.timestamp }
+            guard let newest, let reading = SickMode.readings([newest], unit: unit).first,
+                  SickMode.isFever(reading.value, line: line) else { return nil }
+            return TemperatureCheckPolicy.request(for: newest, value: unit.format(reading.value),
+                                                  childName: firstName(child), hours: hours)
+        }
+        return (timers, doses, checks)
     }
 }
 

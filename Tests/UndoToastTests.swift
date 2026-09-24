@@ -69,6 +69,19 @@ final class UndoToastTests: XCTestCase {
         XCTAssertEqual(try entities().count, 1) // timing out never undoes
     }
 
+    /// Ending sick mode: a toast about something that isn't a record, with its own undo.
+    func testToastWithItsOwnUndo() throws {
+        var undone = false
+        center.show("Sick mode ended") { undone = true }
+        XCTAssertEqual(center.current?.title, "Sick mode ended")
+        XCTAssertNil(center.current?.kind)
+
+        center.undo(in: context)
+        XCTAssertTrue(undone)
+        XCTAssertNil(center.current)
+        XCTAssertEqual(try entities().count, 0)
+    }
+
     func testUndoAfterRecordAlreadyDeletedIsNoOp() throws {
         let entity = logFeeding()
         center.show(entity)

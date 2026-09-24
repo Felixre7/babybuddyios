@@ -133,11 +133,6 @@ final class NotificationTests: UITestCase {
     /// Taps through the system's notification prompt, which only the first test in a run sees:
     /// permission is granted per install, and the simulator is erased around the whole run, not
     /// around each test.
-    private func allowNotificationsIfAsked() {
-        let allow = springboard.buttons["Allow"]
-        if allow.waitForExistence(timeout: 5) { allow.tap() }
-    }
-
     /// An already-delivered alert, wherever it currently is: a banner while it's up, or its
     /// Notification Center row once it has expired.
     private func notification(containing text: String) -> XCUIElement {

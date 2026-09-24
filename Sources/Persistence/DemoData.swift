@@ -30,6 +30,7 @@ enum DemoData {
         if environment["BB_DEMO"] == "1" { seedIfNeeded(into: context) }
     }
 
+    @MainActor
     static func seedIfNeeded(into context: ModelContext) {
         let existing = (try? context.fetch(FetchDescriptor<LocalEntity>()))?.isEmpty ?? true
         guard existing else { return }
@@ -95,7 +96,61 @@ enum DemoData {
         if ProcessInfo.processInfo.environment["BB_SEED_PENDING"] == "1" {
             seedPending(into: context)
         }
+        if let sick = ProcessInfo.processInfo.environment["BB_SEED_SICK"], ["1", "clear"].contains(sick) {
+            seedSick(clear: sick == "clear", into: context)
+        }
         try? context.save()
+    }
+
+    /// `BB_SEED_SICK=1`: a day and a half of fever for the demo child, with sick mode on since the
+    /// first reading over the line, as on board j4. Readings are stored in °F, which either unit's
+    /// phone reads correctly. Ibuprofen (every 6 hr) is OK now and acetaminophen (every 4 hr) is
+    /// waiting; wet diapers and bottle feeds fill the Today grid. ids 3000+.
+    ///
+    /// `BB_SEED_SICK=clear` moves the fever and the doses 30 hours back and adds readings under the
+    /// line since, so Home asks to end sick mode, as on board j7.
+    @MainActor
+    private static func seedSick(clear: Bool, into context: ModelContext) {
+        let now = Date()
+        func iso(_ hoursAgo: Double) -> String {
+            APIDate.isoDateTime.string(from: now.addingTimeInterval(-hoursAgo * 3600))
+        }
+        let shift = clear ? 30.0 : 0
+        var id = 3000
+        func add(_ kind: EntityKind, _ payload: [String: Any]) {
+            insert(kind, id: id, payload.merging(["id": id, "child": 1, "tags": []]) { $1 }, context)
+            id += 1
+        }
+        let readings: [(hoursAgo: Double, value: Double)] = [
+            (34, 99.1), (30, 99.6), (27, 100.9), (24, 100.2), (21, 99.8), (18, 101.7),
+            (15, 102.8), (12, 101.4), (9, 100.5), (4.5, 101.9), (1.33, 100.8),
+        ]
+        for reading in readings {
+            add(.temperature, ["temperature": reading.value, "time": iso(reading.hoursAgo + shift)])
+        }
+        if clear {
+            for (hoursAgo, value) in [(26.2, 99.6), (14.0, 99.3), (1.4, 98.9)] {
+                add(.temperature, ["temperature": value, "time": iso(hoursAgo)])
+            }
+        }
+        for (name, interval, times) in [("Acetaminophen", "04:00:00", [21.5, 15, 8.5, 2.83]),
+                                        ("Ibuprofen", "06:00:00", [14.5, 6.25])] {
+            for hoursAgo in times {
+                add(.medication, ["name": name, "dosage": 5, "dosage_unit": "mL", "time": iso(hoursAgo + shift),
+                                  "next_dose_interval": interval])
+            }
+        }
+        for hoursAgo in [2.4, 5.5, 9.2] {
+            add(.change, ["time": iso(hoursAgo), "wet": true, "solid": false, "color": ""])
+        }
+        for (hoursAgo, amount) in [(0.9, 120.0), (3.6, 90.0), (6.9, 120.0)] {
+            add(.feeding, ["start": iso(hoursAgo + 0.25), "end": iso(hoursAgo), "type": "formula",
+                           "method": "bottle", "amount": amount])
+        }
+        add(.note, ["time": iso(1.67), "note": "Pulling at left ear after nap"])
+        // The boards have no running timer; the demo's own would sit above the sick card.
+        if let timer = LocalStore.fetch(kind: .timer, serverID: 40, in: context) { context.delete(timer) }
+        SickModeStore.shared.start(1, at: now.addingTimeInterval(-(27 + shift) * 3600))
     }
 
     /// Seed a few queued writes — one create, one update, one delete, one blocked create, and a

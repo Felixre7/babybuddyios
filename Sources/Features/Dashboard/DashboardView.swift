@@ -26,6 +26,8 @@ struct DashboardView: View {
     @State private var editing: LocalEntity?
     /// A dose whose reminder was tapped: the editor opens a new dose pre-filled from it.
     @State private var repeatingDose: LocalEntity?
+    /// A reading or dose logged from sick mode, in its own sheet so the log is attributed to it.
+    @State private var sickModeLog: SickModeLog?
     @State private var startingTimer = false
     @State private var quickAddOpen = false
     @State private var showAllActivities = false
@@ -60,11 +62,26 @@ struct DashboardView: View {
     // off; the key comes from ``SupportNudgeStore`` so it can't drift from the one the policy reads.
     @AppStorage(SupportNudgeStore.remindersEnabledKey) private var supportRemindersEnabled = true
 
+    // MARK: Sick mode state (see ``SickMode``)
+
+    @State private var sickMode = SickModeStore.shared
+    // Watched so Home follows Settings ▸ Sick mode; the keys and defaults are the ones SickMode reads.
+    @AppStorage(TemperatureUnit.key, store: SharedDefaults.suite) private var storedUnit: TemperatureUnit?
+    @AppStorage(SickMode.feverLineKey, store: SharedDefaults.suite) private var feverLineCelsius = SickMode.defaultFeverLine
+    @AppStorage(SickMode.suggestKey, store: SharedDefaults.suite) private var suggestsSickMode = true
+
     /// A request to convert a specific timer into a specific activity kind.
     private struct ConvertRequest: Identifiable {
         let timer: LocalEntity
         let kind: EntityKind
         var id: String { "\(timer.localID)-\(kind.rawValue)" }
+    }
+
+    /// A new reading, or the next dose pre-filled from the last one.
+    private struct SickModeLog: Identifiable {
+        let kind: EntityKind
+        var template: LocalEntity?
+        var id: String { template.map { $0.localID.uuidString } ?? kind.rawValue }
     }
 
     /// Wraps a milestone count so `.sheet(item:)` has an `Identifiable` to present.
@@ -97,25 +114,44 @@ struct DashboardView: View {
                 VStack(spacing: 18) {
                     header
 
-                    if activeTimers.isEmpty {
-                        startTimerCard
+                    if let startedAt = sickModeStart {
+                        sickHome(startedAt: startedAt)
                     } else {
-                        VStack(spacing: 12) {
-                            ForEach(activeTimers) { timerHero($0) }
+                        if suggestsSickMode, let reading = SickMode.bannerReading(
+                            SickMode.readings(childEntities, unit: unit), state: sickMode[selectedChildID],
+                            line: feverLine) {
+                            FeverBanner(
+                                reading: reading, unit: unit,
+                                onStart: { sickMode.turnOn(selectedChildID, at: reading.time, source: .banner) },
+                                onDismiss: {
+                                    sickMode.dismissBanner(selectedChildID, reading: reading.entity.localID)
+                                    Analytics.sickModeBannerDismissed()
+                                })
+                            // `task(id:)` rather than onAppear: a newer reading can replace this one
+                            // while the banner stays on screen.
+                            .task(id: reading.entity.localID) {
+                                sickMode.countBanner(selectedChildID, reading: reading.entity.localID)
+                            }
                         }
+
+                        if activeTimers.isEmpty {
+                            startTimerCard
+                        } else {
+                            timerHeroes
+                        }
+
+                        let doses = waitingDoses
+                        if !doses.isEmpty { nextDoseSection(doses) }
+
+                        if inlineNudge == .banner, !nudgesSilenced {
+                            SupportBanner(
+                                onSupport: { acceptNudge(.banner) },
+                                onDismiss: { dismissNudge(.banner) })
+                        }
+
+                        todaySection
+                        if !latestEvents.isEmpty { latestSection }
                     }
-
-                    let doses = waitingDoses
-                    if !doses.isEmpty { nextDoseSection(doses) }
-
-                    if inlineNudge == .banner, !nudgesSilenced {
-                        SupportBanner(
-                            onSupport: { acceptNudge(.banner) },
-                            onDismiss: { dismissNudge(.banner) })
-                    }
-
-                    todaySection
-                    if !latestEvents.isEmpty { latestSection }
                 }
                 .padding(.horizontal)
                 .padding(.top, 8)
@@ -146,13 +182,23 @@ struct DashboardView: View {
                 // Open the editor only after the "More" sheet is fully gone.
                 if let pendingAddKind { addKind = pendingAddKind; self.pendingAddKind = nil }
             }) {
-                AllActivitiesSheet(onPick: { kind in pendingAddKind = kind; showAllActivities = false })
+                AllActivitiesSheet(
+                    showsSickMode: sickModeStart == nil,
+                    onPick: { kind in pendingAddKind = kind; showAllActivities = false },
+                    onStartSickMode: {
+                        sickMode.turnOn(selectedChildID, at: .now, source: .addSheet)
+                        showAllActivities = false
+                    })
             }
             .sheet(item: $editing) { entity in
                 EntityEditorView(kind: entity.kind, childID: selectedChildID, entity: entity)
             }
             .sheet(item: $repeatingDose) { dose in
                 EntityEditorView(kind: .medication, childID: dose.childID ?? selectedChildID, template: dose)
+            }
+            .sheet(item: $sickModeLog) { log in
+                EntityEditorView(kind: log.kind, childID: log.template?.childID ?? selectedChildID,
+                                 template: log.template, source: .sickMode)
             }
             .sheet(isPresented: $startingTimer) {
                 StartTimerSheet(childID: selectedChildID)
@@ -245,13 +291,14 @@ struct DashboardView: View {
 
     /// Whether something else has the screen. Every sheet, the editor, the quick-add stack, both
     /// halves of the timer-stop flow, the app lock, and the no-children empty state all count: a
-    /// nudge landing on a tired parent mid-log is the exact thing this policy exists to avoid.
+    /// nudge landing on a tired parent mid-log is the exact thing this policy exists to avoid. So
+    /// does a sick child: nobody should be asked for a tip over a fever.
     private var isBusy: Bool {
         addKind != nil || editing != nil || startingTimer || quickAddOpen || showAllActivities
             || pendingAddKind != nil || stoppingTimer != nil || convertRequest != nil
             || pendingConvert != nil || showingSupporter || router.showSupporter
             || inlineNudge != .none || milestoneAsk != nil
-            || lock.isLocked || children.isEmpty
+            || lock.isLocked || children.isEmpty || sickModeStart != nil
     }
 
     /// Ask the policy whether a support surface is due — a beat after the Dashboard settles.
@@ -384,7 +431,35 @@ struct DashboardView: View {
         }
     }
 
+    // MARK: Sick mode
+
+    private var sickModeStart: Date? { sickMode[selectedChildID].startedAt }
+    private var unit: TemperatureUnit { storedUnit ?? .region }
+    private var feverLine: Double { unit.convert(feverLineCelsius, from: .celsius) }
+
+    /// Home while sick mode is on for this child: the sick layout, with running timers above it.
+    private func sickHome(startedAt: Date) -> some View {
+        SickHomeView(
+            childID: selectedChildID, startedAt: startedAt, entities: childEntities, unit: unit, line: feverLine,
+            timers: { if !activeTimers.isEmpty { timerHeroes } },
+            onLogTemperature: { sickModeLog = SickModeLog(kind: .temperature) },
+            onLogDose: { sickModeLog = SickModeLog(kind: .medication, template: $0) },
+            onEdit: { editing = $0 },
+            onSeeAll: { router.showTimeline = true },
+            onEnd: { sickMode.turnOff(selectedChildID, source: $0, in: context) },
+            onKeepOn: {
+                sickMode.keepOn(selectedChildID, until: .now.addingTimeInterval(86_400))
+                Analytics.sickModeKeptOn()
+            })
+    }
+
     // MARK: Active timer
+
+    private var timerHeroes: some View {
+        VStack(spacing: 12) {
+            ForEach(activeTimers) { timerHero($0) }
+        }
+    }
 
     private func timerHero(_ timer: LocalEntity) -> some View {
         BBCard {
@@ -783,10 +858,13 @@ private struct QuickAddMenu: View {
 // MARK: - All activities sheet
 
 /// The full activity picker reached from the quick-add stack's "More…" row: every loggable
-/// record type as a tinted glyph tile, grouped into everyday logs and measurements.
+/// record type as a tinted glyph tile, grouped into everyday logs and measurements, and a way into
+/// sick mode while it's off.
 private struct AllActivitiesSheet: View {
     @Environment(\.dismiss) private var dismiss
+    var showsSickMode: Bool
     var onPick: (EntityKind) -> Void
+    var onStartSickMode: () -> Void
 
     private let logKinds: [EntityKind] = [.feeding, .change, .sleep, .tummyTime, .pumping, .note]
     private let measureKinds: [EntityKind] = [.weight, .height, .headCircumference, .temperature, .bmi, .medication]
@@ -798,6 +876,7 @@ private struct AllActivitiesSheet: View {
                 VStack(alignment: .leading, spacing: 20) {
                     section("Log", logKinds)
                     section("Measure", measureKinds)
+                    if showsSickMode { sickModeRow }
                 }
                 .padding()
             }
@@ -809,6 +888,25 @@ private struct AllActivitiesSheet: View {
             }
         }
         .presentationDetents([.medium, .large])
+    }
+
+    /// Board j2: starting sick mode by hand, for when there's no fever reading to offer it.
+    private var sickModeRow: some View {
+        Button(action: onStartSickMode) {
+            BBCard(cornerRadius: BBRadius.row, padding: 13) {
+                HStack(spacing: 12) {
+                    ActivityTile(kind: .temperature, size: 40, glyph: 21, color: BBColor.danger)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Start sick mode").font(.subheadline.weight(.semibold))
+                        Text("Temperatures, doses and diapers on one screen")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    Image(systemName: "chevron.right").foregroundStyle(.tertiary)
+                }
+            }
+        }
+        .buttonStyle(.plain)
     }
 
     private func section(_ title: String, _ kinds: [EntityKind]) -> some View {

@@ -10,6 +10,10 @@ struct MainTabView: View {
     @Environment(AppLockManager.self) private var lock
     @Query(filter: #Predicate<LocalEntity> { $0.kindRaw == "child" }, sort: \.timestamp)
     private var children: [LocalEntity]
+    /// Every cached dose, for every child: medicine colors follow the order names first appear.
+    @Query(filter: #Predicate<LocalEntity> { $0.kindRaw == "medication" })
+    private var medications: [LocalEntity]
+    @State private var sickMode = SickModeStore.shared
     // Stored in the App Group suite so the timer widget/intents target the same child.
     @AppStorage("selectedChildID", store: SharedDefaults.suite) private var selectedChildID = 0
     /// The marketing version whose What's New card has been seen on this device. App-local, not in
@@ -22,6 +26,9 @@ struct MainTabView: View {
         TabView(selection: $selectedTab) {
             DashboardView(selectedChildID: childBinding)
                 .tabItem { Label("Home", systemImage: "house.fill") }.tag(0)
+                // Sick mode's red dot: a native badge with no text draws as a dot. Not an overlay,
+                // since one on the TabView doesn't take taps on iOS 26.
+                .badge(sickMode[selectedChildID].startedAt == nil ? nil : Text(""))
             TimelineView(selectedChildID: childBinding)
                 .tabItem { Label("Timeline", systemImage: "list.bullet") }.tag(1)
             InsightsView(selectedChildID: childBinding)
@@ -48,6 +55,12 @@ struct MainTabView: View {
         }
         .onChange(of: router.showTimelineKind) { _, kind in
             if kind != nil { selectedTab = 1 } // a Latest row targets the Timeline tab
+        }
+        .onChange(of: router.showTimeline) { _, show in
+            if show { selectedTab = 1; router.showTimeline = false } // sick mode's "See all"
+        }
+        .onChange(of: medications.map(\.payload), initial: true) { _, _ in
+            MedicineColorStore.shared.assign(medications)
         }
         .sheet(isPresented: Binding(get: { router.showSupporter },
                                     set: { router.showSupporter = $0 })) {

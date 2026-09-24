@@ -139,6 +139,9 @@ extension Analytics {
         case timerStop
         /// An App Intent — a Quick Log widget tile or Siri.
         case intent
+        /// The editor opened from sick mode: the sick card's "Log temperature", or a medicine
+        /// card's button for the next dose.
+        case sickMode
     }
 
     /// A completed activity record was logged (created), of any kind — e.g. a diaper change,
@@ -150,6 +153,69 @@ extension Analytics {
     /// work for the same result. Coarse and closed: never what was logged, only how.
     static func activityLogged(kind: String, source: ActivitySource) {
         signal("Activity.logged", parameters: ["kind": kind, "source": source.rawValue])
+    }
+
+    // MARK: Sick mode
+    //
+    // How sick mode is used: which way people turn it on, whether the fever banner and the end
+    // prompt work, and which way it ends. Like everything here the signals describe the feature,
+    // never the child: no readings, doses, medicine names, or how long sick mode stayed on.
+
+    /// Which way sick mode was turned on.
+    enum SickModeStart: String, CaseIterable {
+        /// "Start sick mode" on the Home banner that follows a reading over the fever line.
+        case banner
+        /// The "Start sick mode" row under "+" ▸ More….
+        case addSheet
+        /// Start in Settings ▸ Sick mode.
+        case settings
+    }
+
+    /// Which way sick mode was turned off.
+    enum SickModeEnd: String, CaseIterable {
+        /// "End sick mode" on the prompt that follows a day with no fever and no dose.
+        case endPrompt
+        /// The "End sick mode" button at the bottom of the sick Home.
+        case home
+        /// End in Settings ▸ Sick mode.
+        case settings
+    }
+
+    /// Sick mode was turned on. Undoing an end isn't a start; it sends ``sickModeEndUndone()``.
+    static func sickModeStarted(source: SickModeStart) {
+        signal("SickMode.started", parameters: ["source": source.rawValue])
+    }
+
+    /// The fever banner reached Home, counted once per reading. Against `SickMode.started` with
+    /// `source: banner`, it says how often the banner is taken up.
+    static func sickModeBannerShown() {
+        signal("SickMode.bannerShown")
+    }
+
+    /// The banner was closed, or "Not now" tapped: turned down for that reading.
+    static func sickModeBannerDismissed() {
+        signal("SickMode.bannerDismissed")
+    }
+
+    /// The end prompt reached Home, counted once each time it appears rather than per redraw.
+    static func sickModeEndPromptShown() {
+        signal("SickMode.endPromptShown")
+    }
+
+    /// "Keep it on" on the end prompt. Many of these against `SickMode.ended` with
+    /// `source: endPrompt` would mean the prompt asks too early.
+    static func sickModeKeptOn() {
+        signal("SickMode.keptOn")
+    }
+
+    /// Sick mode was turned off.
+    static func sickModeEnded(source: SickModeEnd) {
+        signal("SickMode.ended", parameters: ["source": source.rawValue])
+    }
+
+    /// Undo on the "Sick mode ended" toast: an end that was probably a mistake.
+    static func sickModeEndUndone() {
+        signal("SickMode.endUndone")
     }
 
     /// The Trends tab was opened, or its window changed. `period` is the rolling window in days

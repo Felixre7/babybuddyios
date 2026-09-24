@@ -43,6 +43,13 @@ struct SettingsView: View {
     // Mirrors MedicationReminderPolicy.isEnabled.
     @AppStorage(MedicationReminderPolicy.enabledKey, store: SharedDefaults.suite) private var doseRemindersEnabled = false
     @AppStorage(UndoToastCenter.enabledKey) private var undoToastEnabled = true
+    // Sick mode (see ``SickMode``): the keys and defaults are the ones it reads.
+    @State private var sickMode = SickModeStore.shared
+    @State private var medicineColors = MedicineColorStore.shared
+    @AppStorage(TemperatureUnit.key, store: SharedDefaults.suite) private var storedUnit: TemperatureUnit?
+    @AppStorage(SickMode.feverLineKey, store: SharedDefaults.suite) private var feverLineCelsius = SickMode.defaultFeverLine
+    @AppStorage(SickMode.suggestKey, store: SharedDefaults.suite) private var suggestsSickMode = true
+    @AppStorage(SickMode.checkHoursKey, store: SharedDefaults.suite) private var checkHours = SickMode.defaultCheckHours
 
     @State private var debugConflict: ConflictRecord?
     @State private var debugIcons = false
@@ -98,6 +105,8 @@ struct SettingsView: View {
                         }
                     }
 
+                    sectioned("Sick mode") { sickModeCard }
+
                     sectioned("Notifications") {
                         notificationsCard
                         Text("Each phone schedules its own medication reminders from synced doses, so pull to refresh before giving a dose in case someone else just logged one.")
@@ -135,6 +144,8 @@ struct SettingsView: View {
                 .padding(.bottom, 28)
             }
             .background(BBColor.surface)
+            // "Sick mode ended" and its Undo, when it's ended from here.
+            .overlay(alignment: .bottom) { UndoToastView().padding(.bottom, 12) }
             .navigationTitle("Settings")
             // `.alert`, not `confirmationDialog`, which iOS 26 shows as a popover without its Cancel.
             .alert("Contact Support", isPresented: $showingContactOptions) {
@@ -400,6 +411,100 @@ struct SettingsView: View {
                     .disabled(!lock.biometryAvailable)
             }
         }
+    }
+
+    // MARK: Sick mode
+
+    /// Boards j3 and c1. The first row starts or ends sick mode for the child in the masthead; the
+    /// rest are this phone's settings for it.
+    private var sickModeCard: some View {
+        let unit = storedUnit ?? .region
+        return card {
+            sickModeRow
+            rowDivider
+            SettingsRow(symbol: "thermometer.medium", tint: BBColor.brand, title: "Temperature unit",
+                        subtitle: storedUnit == nil ? "Set from your region" : nil) {
+                // Only a real change is stored, so tapping the region's own unit keeps "from your region".
+                BBSegmentedControl(selection: Binding(get: { unit }, set: { if $0 != unit { storedUnit = $0 } }),
+                                   options: TemperatureUnit.allCases) { $0.symbol }
+                    .frame(width: 96)
+            }
+            rowDivider
+            NavigationLink { FeverLineView() } label: {
+                SettingsRow(symbol: "thermometer.medium", tint: BBColor.brand, title: "Fever line") {
+                    HStack(spacing: 4) {
+                        Text(unit.format(unit.convert(feverLineCelsius, from: .celsius)))
+                            .font(.subheadline).foregroundStyle(.secondary)
+                        disclosure
+                    }
+                }
+            }
+            .buttonStyle(.plain)
+            rowDivider
+            SettingsRow(symbol: "scope", tint: BBColor.brand, title: "Suggest after a fever",
+                        subtitle: "Shows the banner on Home") {
+                Toggle("Suggest after a fever", isOn: $suggestsSickMode)
+                    .labelsHidden()
+                    .tint(BBColor.primary)
+            }
+            rowDivider
+            NavigationLink { TemperatureChecksView() } label: {
+                SettingsRow(symbol: "stopwatch", tint: BBColor.brand, title: "Temperature checks") {
+                    HStack(spacing: 4) {
+                        Text(TemperatureChecksView.label(checkHours))
+                            .font(.subheadline).foregroundStyle(.secondary)
+                        disclosure
+                    }
+                }
+            }
+            .buttonStyle(.plain)
+            rowDivider
+            NavigationLink { MedicineColorsView() } label: {
+                SettingsRow(symbol: "pills.fill", tint: MedicineColor.purple.color, title: "Medicine colors") {
+                    HStack(spacing: 6) {
+                        HStack(spacing: 3) {
+                            ForEach(medicineColors.assigned.prefix(6), id: \.self) { name in
+                                Circle().fill(medicineColors.color(name).color).frame(width: 10, height: 10)
+                            }
+                        }
+                        .accessibilityHidden(true)
+                        disclosure
+                    }
+                }
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    private var sickModeRow: some View {
+        let child = currentChild?.serverID
+        let startedAt = child.flatMap { sickMode[$0].startedAt }
+        return SettingsRow(symbol: "thermometer.medium", tint: BBColor.danger, title: "Sick mode",
+                           subtitle: startedAt.map { "On · day \(SickMode.day(since: $0, now: .now))" } ?? "Off") {
+            if let child {
+                if startedAt == nil {
+                    smallButton("Start", tinted: true) { sickMode.turnOn(child, at: .now, source: .settings) }
+                        .accessibilityLabel("Start sick mode")
+                } else {
+                    smallButton("End", tinted: false) { sickMode.turnOff(child, source: .settings, in: context) }
+                        .accessibilityLabel("End sick mode")
+                }
+            }
+        }
+    }
+
+    /// The row-sized buttons: tinted to start, neutral to end.
+    private func smallButton(_ title: String, tinted: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(tinted ? BBColor.brandAccent : Color.primary)
+                .padding(.horizontal, 14)
+                .frame(height: 34)
+                .background(tinted ? BBColor.brandTint : BBColor.controlFill,
+                            in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: Notifications
@@ -868,6 +973,7 @@ struct SettingsRow<Trailing: View>: View {
     let tint: Color
     var glyphColor: Color? = nil
     let title: String
+    var subtitle: String? = nil
     @ViewBuilder var trailing: () -> Trailing
 
     var body: some View {
@@ -880,7 +986,10 @@ struct SettingsRow<Trailing: View>: View {
                         .font(.system(size: 15, weight: .semibold))
                         .foregroundStyle(glyphColor ?? tint)
                 }
-            Text(title).font(.system(size: 16))
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title).font(.system(size: 16))
+                if let subtitle { Text(subtitle).font(.caption).foregroundStyle(.secondary) }
+            }
             Spacer(minLength: 8)
             trailing()
         }

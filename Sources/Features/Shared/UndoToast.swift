@@ -4,7 +4,8 @@ import SwiftData
 /// The one transient "Logged <kind> · Undo" toast. Every record created on this device lands
 /// here via ``LocalRepository/didLogActivity``; showing a new one replaces the old (its window
 /// to undo simply closes), and undo routes through the existing ``LocalRepository/delete`` —
-/// an unpushed create is dropped locally, a synced one queues the normal delete.
+/// an unpushed create is dropped locally, a synced one queues the normal delete. A change that
+/// isn't a record, like ending sick mode, brings its own undo.
 @MainActor @Observable
 final class UndoToastCenter {
     static let shared = UndoToastCenter()
@@ -15,9 +16,15 @@ final class UndoToastCenter {
 
     struct Item: Identifiable, Equatable {
         let id = UUID()
-        let localID: UUID
-        let kind: EntityKind
+        /// The logged record, or `nil` when `revert` undoes something else.
+        let localID: UUID?
+        /// Draws the activity tile; `nil` for a toast about something that isn't a record.
+        let kind: EntityKind?
+        let title: String
         let subtitle: String?
+        let revert: (@MainActor () -> Void)?
+
+        static func == (lhs: Item, rhs: Item) -> Bool { lhs.id == rhs.id }
     }
 
     private(set) var current: Item?
@@ -34,8 +41,17 @@ final class UndoToastCenter {
     private var dismissal: Task<Void, Never>?
 
     func show(_ entity: LocalEntity) {
-        let item = Item(localID: entity.localID, kind: entity.kind,
-                        subtitle: EntityFormatting.subtitle(entity))
+        present(Item(localID: entity.localID, kind: entity.kind,
+                     title: "Logged \(entity.kind.displayName.lowercased())",
+                     subtitle: EntityFormatting.subtitle(entity), revert: nil))
+    }
+
+    /// A toast for a change that isn't a new record, with what undoing it does.
+    func show(_ title: String, undo: @escaping @MainActor () -> Void) {
+        present(Item(localID: nil, kind: nil, title: title, subtitle: nil, revert: undo))
+    }
+
+    private func present(_ item: Item) {
         current = item
         dismissal?.cancel()
         dismissal = Task { [duration] in
@@ -49,11 +65,13 @@ final class UndoToastCenter {
         current = nil
     }
 
-    /// Reverse the shown create. Looks the record up fresh: it may already be gone (deleted from
+    /// Reverse the shown change. A create is looked up fresh: it may already be gone (deleted from
     /// the Timeline while the toast was up), in which case there is nothing to do.
     func undo(in context: ModelContext) {
         guard let item = current else { return }
-        if let entity = LocalStore.fetch(localID: item.localID, in: context) {
+        if let revert = item.revert {
+            revert()
+        } else if let localID = item.localID, let entity = LocalStore.fetch(localID: localID, in: context) {
             LocalRepository(context: context).delete(entity)
         }
         dismiss()
@@ -75,9 +93,9 @@ struct UndoToastView: View {
     @ViewBuilder private var toast: some View {
         if let item = center.current {
             HStack(spacing: 11) {
-                ActivityTile(kind: item.kind, size: 34, glyph: 18)
+                if let kind = item.kind { ActivityTile(kind: kind, size: 34, glyph: 18) }
                 VStack(alignment: .leading, spacing: 1) {
-                    Text("Logged \(item.kind.displayName.lowercased())")
+                    Text(item.title)
                         .font(.subheadline.weight(.semibold))
                     if let subtitle = item.subtitle, !subtitle.isEmpty {
                         Text(subtitle).font(.footnote).foregroundStyle(.secondary).lineLimit(1)
@@ -97,7 +115,7 @@ struct UndoToastView: View {
             }
             .padding(.horizontal, 12).padding(.vertical, 11)
             .background(alignment: .bottom) {
-                DrainBar(color: BBColor.activity(item.kind), duration: center.duration)
+                DrainBar(color: item.kind.map(BBColor.activity) ?? BBColor.brand, duration: center.duration)
                     .id(item.id)
             }
             .background(BBColor.card, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
@@ -105,7 +123,7 @@ struct UndoToastView: View {
             .padding(.horizontal, 16)
             .transition(.move(edge: .bottom).combined(with: .opacity))
             .accessibilityElement(children: .contain)
-            .accessibilityLabel("Logged \(item.kind.displayName)")
+            .accessibilityLabel(item.kind.map { "Logged \($0.displayName)" } ?? item.title)
             .accessibilityAction(named: "Undo") { center.undo(in: context) }
         }
     }
