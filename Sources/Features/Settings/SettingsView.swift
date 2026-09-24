@@ -483,10 +483,10 @@ struct SettingsView: View {
                            subtitle: startedAt.map { "On · day \(SickMode.day(since: $0, now: .now))" } ?? "Off") {
             if let child {
                 if startedAt == nil {
-                    smallButton("Start", tinted: true) { sickMode.turnOn(child, at: .now) }
+                    smallButton("Start", tinted: true) { sickMode.turnOn(child, at: .now, source: .settings) }
                         .accessibilityLabel("Start sick mode")
                 } else {
-                    smallButton("End", tinted: false) { sickMode.turnOff(child, in: context) }
+                    smallButton("End", tinted: false) { sickMode.turnOff(child, source: .settings, in: context) }
                         .accessibilityLabel("End sick mode")
                 }
             }

@@ -17,7 +17,7 @@ struct SickHomeView<Timers: View>: View {
     var onLogDose: (LocalEntity) -> Void
     var onEdit: (LocalEntity) -> Void
     var onSeeAll: () -> Void
-    var onEnd: () -> Void
+    var onEnd: (Analytics.SickModeEnd) -> Void
     var onKeepOn: () -> Void
 
     @State private var sickMode = SickModeStore.shared
@@ -104,7 +104,7 @@ struct SickHomeView<Timers: View>: View {
                 }
                 .accessibilityElement(children: .combine)
                 HStack(spacing: 8) {
-                    Button("End sick mode", action: onEnd).buttonStyle(.bbPrimary)
+                    Button("End sick mode") { onEnd(.endPrompt) }.buttonStyle(.bbPrimary)
                     Button("Keep it on", action: onKeepOn).buttonStyle(.bbNeutral)
                 }
                 Text(Self.endCaption).font(.caption).foregroundStyle(.secondary)
@@ -115,6 +115,7 @@ struct SickHomeView<Timers: View>: View {
             RoundedRectangle(cornerRadius: BBRadius.card, style: .continuous)
                 .strokeBorder(BBColor.success, lineWidth: 1.5)
         }
+        .onAppear { sickMode.countEndPrompt(childID) }
     }
 
     static var endCaption: String { "Every reading and dose stays in Baby Buddy. Home goes back to its usual layout." }
@@ -498,7 +499,7 @@ struct SickHomeView<Timers: View>: View {
 
     private var endButton: some View {
         VStack(spacing: 8) {
-            Button("End sick mode", action: onEnd).buttonStyle(.bbNeutral)
+            Button("End sick mode") { onEnd(.home) }.buttonStyle(.bbNeutral)
             Text(Self.endCaption)
                 .font(.caption).foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)

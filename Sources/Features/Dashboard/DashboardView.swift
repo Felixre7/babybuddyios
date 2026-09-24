@@ -26,6 +26,8 @@ struct DashboardView: View {
     @State private var editing: LocalEntity?
     /// A dose whose reminder was tapped: the editor opens a new dose pre-filled from it.
     @State private var repeatingDose: LocalEntity?
+    /// A reading or dose logged from sick mode, in its own sheet so the log is attributed to it.
+    @State private var sickModeLog: SickModeLog?
     @State private var startingTimer = false
     @State private var quickAddOpen = false
     @State private var showAllActivities = false
@@ -75,6 +77,13 @@ struct DashboardView: View {
         var id: String { "\(timer.localID)-\(kind.rawValue)" }
     }
 
+    /// A new reading, or the next dose pre-filled from the last one.
+    private struct SickModeLog: Identifiable {
+        let kind: EntityKind
+        var template: LocalEntity?
+        var id: String { template.map { $0.localID.uuidString } ?? kind.rawValue }
+    }
+
     /// Wraps a milestone count so `.sheet(item:)` has an `Identifiable` to present.
     private struct MilestoneAsk: Identifiable {
         let count: Int
@@ -113,8 +122,16 @@ struct DashboardView: View {
                             line: feverLine) {
                             FeverBanner(
                                 reading: reading, unit: unit,
-                                onStart: { sickMode.turnOn(selectedChildID, at: reading.time) },
-                                onDismiss: { sickMode.dismissBanner(selectedChildID, reading: reading.entity.localID) })
+                                onStart: { sickMode.turnOn(selectedChildID, at: reading.time, source: .banner) },
+                                onDismiss: {
+                                    sickMode.dismissBanner(selectedChildID, reading: reading.entity.localID)
+                                    Analytics.sickModeBannerDismissed()
+                                })
+                            // `task(id:)` rather than onAppear: a newer reading can replace this one
+                            // while the banner stays on screen.
+                            .task(id: reading.entity.localID) {
+                                sickMode.countBanner(selectedChildID, reading: reading.entity.localID)
+                            }
                         }
 
                         if activeTimers.isEmpty {
@@ -169,7 +186,7 @@ struct DashboardView: View {
                     showsSickMode: sickModeStart == nil,
                     onPick: { kind in pendingAddKind = kind; showAllActivities = false },
                     onStartSickMode: {
-                        sickMode.turnOn(selectedChildID, at: .now)
+                        sickMode.turnOn(selectedChildID, at: .now, source: .addSheet)
                         showAllActivities = false
                     })
             }
@@ -178,6 +195,10 @@ struct DashboardView: View {
             }
             .sheet(item: $repeatingDose) { dose in
                 EntityEditorView(kind: .medication, childID: dose.childID ?? selectedChildID, template: dose)
+            }
+            .sheet(item: $sickModeLog) { log in
+                EntityEditorView(kind: log.kind, childID: log.template?.childID ?? selectedChildID,
+                                 template: log.template, source: .sickMode)
             }
             .sheet(isPresented: $startingTimer) {
                 StartTimerSheet(childID: selectedChildID)
@@ -421,12 +442,15 @@ struct DashboardView: View {
         SickHomeView(
             childID: selectedChildID, startedAt: startedAt, entities: childEntities, unit: unit, line: feverLine,
             timers: { if !activeTimers.isEmpty { timerHeroes } },
-            onLogTemperature: { addKind = .temperature },
-            onLogDose: { repeatingDose = $0 },
+            onLogTemperature: { sickModeLog = SickModeLog(kind: .temperature) },
+            onLogDose: { sickModeLog = SickModeLog(kind: .medication, template: $0) },
             onEdit: { editing = $0 },
             onSeeAll: { router.showTimeline = true },
-            onEnd: { sickMode.turnOff(selectedChildID, in: context) },
-            onKeepOn: { sickMode.keepOn(selectedChildID, until: .now.addingTimeInterval(86_400)) })
+            onEnd: { sickMode.turnOff(selectedChildID, source: $0, in: context) },
+            onKeepOn: {
+                sickMode.keepOn(selectedChildID, until: .now.addingTimeInterval(86_400))
+                Analytics.sickModeKeptOn()
+            })
     }
 
     // MARK: Active timer

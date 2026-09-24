@@ -22,17 +22,20 @@ struct EntityEditorView: View {
     /// Set when logging the next dose from a medication reminder: a new record pre-filled from this
     /// one, timed now.
     let template: LocalEntity?
+    /// Where a new record's `Activity.logged` says it came from.
+    let source: Analytics.ActivitySource
 
     /// The record kind. Mirrored into state so the top activity selector can swap it while
     /// creating; locked to the passed-in value when editing or converting.
     @State private var kind: EntityKind
 
     init(kind: EntityKind, childID: Int, entity: LocalEntity? = nil, sourceTimer: LocalEntity? = nil,
-         template: LocalEntity? = nil) {
+         template: LocalEntity? = nil, source: Analytics.ActivitySource = .editor) {
         self.childID = childID
         self.entity = entity
         self.sourceTimer = sourceTimer
         self.template = template
+        self.source = source
         _kind = State(initialValue: kind)
     }
 
@@ -794,7 +797,7 @@ struct EntityEditorView: View {
             repo.update(entity, payload: payload)
             target = entity
         } else {
-            target = repo.create(kind: kind, payload: payload)
+            target = repo.create(kind: kind, payload: payload, source: source)
         }
         if let pickedImageData, let target {
             repo.enqueueImageUpload(for: target, imageData: pickedImageData)

@@ -195,6 +195,10 @@ final class SickModeStore {
         var dismissedReading: UUID?
         /// "Keep it on" hides the end prompt until this time.
         var keepOnUntil: Date?
+        /// The reading whose banner was last counted as shown.
+        var bannerCounted: UUID?
+        /// Which appearance of the end prompt was last counted: see ``SickModeStore/countEndPrompt(_:)``.
+        var endPromptCounted: Date?
     }
 
     private static let key = "sickMode"
@@ -242,13 +246,13 @@ final class SickModeStore {
 
 extension SickModeStore {
     /// Starting from the banner, "+" ▸ More… or Settings. A temperature check may now be due.
-    func turnOn(_ child: Int, at date: Date) {
-        start(child, at: date)
-        Task { await LocalAlerts.shared.reconcile() }
+    func turnOn(_ child: Int, at date: Date, source: Analytics.SickModeStart) {
+        resume(child, at: date)
+        Analytics.sickModeStarted(source: source)
     }
 
-    /// Ending from Home or Settings, with a toast whose Undo restores the same start.
-    func turnOff(_ child: Int, in context: ModelContext) {
+    /// Ending from the prompt, Home or Settings, with a toast whose Undo restores the same start.
+    func turnOff(_ child: Int, source: Analytics.SickModeEnd, in context: ModelContext) {
         guard let startedAt = self[child].startedAt else { return }
         let temperature = EntityKind.temperature.rawValue
         var newest = FetchDescriptor<LocalEntity>(
@@ -256,7 +260,37 @@ extension SickModeStore {
             sortBy: [SortDescriptor(\.timestamp, order: .reverse)])
         newest.fetchLimit = 1
         end(child, newestReading: (try? context.fetch(newest))?.first?.localID)
-        UndoToastCenter.shared.show("Sick mode ended") { self.turnOn(child, at: startedAt) }
+        Analytics.sickModeEnded(source: source)
+        UndoToastCenter.shared.show("Sick mode ended") {
+            self.resume(child, at: startedAt)
+            Analytics.sickModeEndUndone()
+        }
         Task { await LocalAlerts.shared.reconcile() }
+    }
+
+    /// On again without counting a start: the Undo of an end.
+    private func resume(_ child: Int, at date: Date) {
+        start(child, at: date)
+        Task { await LocalAlerts.shared.reconcile() }
+    }
+
+    /// The fever banner is on Home for `reading`. Counted once per reading, however often Home
+    /// redraws or the app relaunches.
+    func countBanner(_ child: Int, reading: UUID) {
+        guard self[child].bannerCounted != reading else { return }
+        update(child) { $0.bannerCounted = reading }
+        Analytics.sickModeBannerShown()
+    }
+
+    /// The end prompt is on Home. Each appearance follows either the start or a "Keep it on", so
+    /// that time names it, and the prompt is counted once per appearance.
+    // ponytail: a prompt that goes, because of a later fever or dose, and comes back without a
+    // "Keep it on" is counted once; key on the clear window's start if that ever matters.
+    func countEndPrompt(_ child: Int) {
+        let state = self[child]
+        guard let appearance = state.keepOnUntil ?? state.startedAt,
+              state.endPromptCounted != appearance else { return }
+        update(child) { $0.endPromptCounted = appearance }
+        Analytics.sickModeEndPromptShown()
     }
 }
