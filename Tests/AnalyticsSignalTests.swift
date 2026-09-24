@@ -101,14 +101,18 @@ final class AnalyticsSignalTests: XCTestCase {
         XCTAssertEqual(Analytics.ActivitySource.sickMode.rawValue, "sickMode")
     }
 
-    /// The Trends tab is parameterized by exactly one thing, and the period must arrive as the plain
-    /// day count the segmented control offers — not a localized label, which would be free text.
+    /// The period must arrive as the plain day count the segmented control offers, not a localized
+    /// label, which would be free text. The fever chart rides along as one of two words: whether it
+    /// had readings to draw, never what they were.
     func testInsightsViewedCarriesThePeriodAsADayCount() {
         for period in ChartPeriod.allCases {
-            let recorder = SignalRecorder()
-            defer { recorder.stop() }
-            Analytics.insightsViewed(periodDays: period.days)
-            XCTAssertEqual(recorder.parameters("Insights.viewed"), ["period": String(period.days)])
+            for chart in [Analytics.TemperatureChart.drawn, .empty] {
+                let recorder = SignalRecorder()
+                defer { recorder.stop() }
+                Analytics.insightsViewed(periodDays: period.days, temperature: chart)
+                XCTAssertEqual(recorder.parameters("Insights.viewed"),
+                               ["period": String(period.days), "temperature": chart.rawValue])
+            }
         }
         // …and those really are the three the app offers.
         XCTAssertEqual(ChartPeriod.allCases.map(\.days), [7, 14, 30])

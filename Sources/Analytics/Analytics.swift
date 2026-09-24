@@ -218,10 +218,20 @@ extension Analytics {
         signal("SickMode.endUndone")
     }
 
+    /// Whether the temperature card had a spell to draw, which decides where the card belongs.
+    enum TemperatureChart: String {
+        /// Readings in the window, so the fever chart is on the card.
+        case drawn
+        /// None, so the card reads "No temperatures logged".
+        case empty
+    }
+
     /// The Trends tab was opened, or its window changed. `period` is the rolling window in days
-    /// ("7" / "14" / "30") — the only thing the screen is parameterized by.
-    static func insightsViewed(periodDays: Int) {
-        signal("Insights.viewed", parameters: ["period": String(periodDays)])
+    /// ("7" / "14" / "30"), and `temperature` whether the fever chart had anything to draw over it.
+    /// Neither says anything about the readings themselves, only whether any fell in the window.
+    static func insightsViewed(periodDays: Int, temperature: TemperatureChart) {
+        signal("Insights.viewed",
+               parameters: ["period": String(periodDays), "temperature": temperature.rawValue])
     }
 
     /// A widget/App Intent was performed (e.g. from a Home Screen widget button or Siri).

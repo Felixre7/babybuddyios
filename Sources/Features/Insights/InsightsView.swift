@@ -65,12 +65,14 @@ struct InsightsView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ChildSwitcher(children: children, selectedChildID: $selectedChildID) }
             .refreshable { await sync.sync() }
-            // Whether Trends earns its place in the tab bar, and which window people actually
-            // reach for. Fires on arrival and on every change of the segmented control — the tab
-            // has one screen and one parameter, so those two are the whole picture.
-            .onAppear { Analytics.insightsViewed(periodDays: period.days) }
+            // Whether Trends earns its place in the tab bar, which window people actually reach
+            // for, and how often the temperature card has a spell to draw over it. Fires on arrival
+            // and on every change of the segmented control, which between them are the whole screen.
+            .onAppear { Analytics.insightsViewed(periodDays: period.days,
+                                                 temperature: temperatureChart(period)) }
             .onChange(of: period) { _, newPeriod in
-                Analytics.insightsViewed(periodDays: newPeriod.days)
+                Analytics.insightsViewed(periodDays: newPeriod.days,
+                                         temperature: temperatureChart(newPeriod))
             }
             .overlay {
                 if children.isEmpty {
@@ -352,6 +354,14 @@ struct InsightsView: View {
 
     private var unit: TemperatureUnit { storedUnit ?? .region }
     private var feverLine: Double { unit.convert(feverLineCelsius, from: .celsius) }
+
+    /// Whether the card draws a chart or its empty state over `period`, for ``Analytics``. The card
+    /// is the last one on the screen, so how often it has anything to show is what says where it
+    /// belongs.
+    private func temperatureChart(_ period: ChartPeriod) -> Analytics.TemperatureChart {
+        aggregator.temperatures(chartEntities, childID: selectedChildID, period: period, unit: unit)
+            .isEmpty ? .empty : .drawn
+    }
 
     /// Whether the marks reach over more than a day and a half, and so want dates on the x axis.
     private func spansDays(_ readings: [SickMode.Reading], _ doses: [LocalEntity]) -> Bool {
