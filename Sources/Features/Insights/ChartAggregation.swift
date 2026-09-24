@@ -49,6 +49,14 @@ struct DailyDiaper: Identifiable, Equatable {
     var total: Int { wet + solid }
 }
 
+/// One medicine on the temperature chart's legend.
+struct DoseTally: Identifiable, Equatable {
+    /// The normalized name, which is also the key its color is kept under.
+    let id: String
+    let name: String
+    let count: Int
+}
+
 /// Pure, read-only aggregation of cached ``LocalEntity`` records into per-day chart series for
 /// the Trends screen. Bucketing uses the denormalized `timestamp` (each kind's primary time
 /// field), so an event lands on the calendar day it started/occurred. `calendar` is injectable
@@ -128,6 +136,50 @@ struct ChartAggregator {
         return days(for: period, now: now).map {
             DailyDiaper(day: $0, wet: wet[$0] ?? 0, solid: solid[$0] ?? 0)
         }
+    }
+
+    // MARK: Temperature
+
+    /// The child's temperature readings in the window, oldest first, read in `unit`.
+    func temperatures(_ entities: [LocalEntity], childID: Int, period: ChartPeriod,
+                      unit: TemperatureUnit, now: Date = .now) -> [SickMode.Reading] {
+        SickMode.readings(inWindow(entities, kind: .temperature, childID: childID, period: period, now: now),
+                          unit: unit)
+    }
+
+    /// The child's medication doses in the window, oldest first.
+    func doses(_ entities: [LocalEntity], childID: Int, period: ChartPeriod,
+               now: Date = .now) -> [LocalEntity] {
+        inWindow(entities, kind: .medication, childID: childID, period: period, now: now)
+    }
+
+    /// The medicines among `doses`, in the order their first dose appears, with how many doses each
+    /// one has. Names are matched the way ``MedicationReminderPolicy`` matches them, so "Tylenol "
+    /// and "tylenol" are one medicine, spelled the way its first dose spells it.
+    func doseTallies(_ doses: [LocalEntity]) -> [DoseTally] {
+        var order: [String] = []
+        var names = [String: String]()
+        var counts = [String: Int]()
+        for dose in doses {
+            let spelled = (dose.payloadObject["name"] as? String ?? "").trimmingCharacters(in: .whitespaces)
+            let key = MedicationReminderPolicy.normalizedName(spelled)
+            if counts[key] == nil {
+                order.append(key)
+                names[key] = spelled.isEmpty ? "Medication" : spelled
+            }
+            counts[key, default: 0] += 1
+        }
+        return order.map { DoseTally(id: $0, name: names[$0]!, count: counts[$0]!) }
+    }
+
+    /// One kind's records for one child from the window's first day up to `now`, oldest first.
+    /// These carry their own time onto the chart rather than being bucketed into a day.
+    private func inWindow(_ entities: [LocalEntity], kind: EntityKind, childID: Int,
+                          period: ChartPeriod, now: Date) -> [LocalEntity] {
+        let start = days(for: period, now: now)[0]
+        return matching(entities, kind: kind, childID: childID)
+            .filter { $0.timestamp >= start && $0.timestamp <= now }
+            .sorted { $0.timestamp < $1.timestamp }
     }
 
     // MARK: Helpers

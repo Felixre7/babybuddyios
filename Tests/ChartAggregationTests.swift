@@ -155,6 +155,57 @@ final class ChartAggregationTests: XCTestCase {
         XCTAssertTrue(series.allSatisfy { $0.count == 0 && $0.totalAmount == 0 })
     }
 
+    // MARK: Temperature (#79)
+
+    /// Readings come back oldest first, only for this child, and only from the window.
+    func testTemperaturesInWindowOldestFirst() {
+        add(.temperature, ["time": "2026-06-14T09:00:00Z", "temperature": 101.2])
+        add(.temperature, ["time": "2026-06-12T21:00:00Z", "temperature": 99.4])
+        add(.temperature, ["time": "2026-06-01T09:00:00Z", "temperature": 103.0]) // before the window
+        add(.temperature, ["time": "2026-06-16T09:00:00Z", "temperature": 104.0]) // after now
+        add(.temperature, ["time": "2026-06-13T09:00:00Z", "temperature": 100.1], child: 2)
+        add(.temperature, ["time": "2026-06-13T10:00:00Z", "temperature": 100.2], deleted: true)
+
+        let readings = aggregator.temperatures(all(), childID: 1, period: .week,
+                                               unit: .fahrenheit, now: now)
+        XCTAssertEqual(readings.map(\.value), [99.4, 101.2])
+
+        // The 30-day window reaches back to the 1st; "after now" stays out of both.
+        XCTAssertEqual(aggregator.temperatures(all(), childID: 1, period: .month,
+                                               unit: .fahrenheit, now: now).map(\.value),
+                       [103.0, 99.4, 101.2])
+    }
+
+    /// A stored number is read by its range, so a °F server reads correctly on a °C phone.
+    func testTemperaturesConvertToThePhonesUnit() {
+        add(.temperature, ["time": "2026-06-14T09:00:00Z", "temperature": 101.2])
+        XCTAssertEqual(aggregator.temperatures(all(), childID: 1, period: .week,
+                                               unit: .celsius, now: now).map(\.value), [38.4])
+    }
+
+    func testDosesInWindowOldestFirst() {
+        add(.medication, ["time": "2026-06-14T09:00:00Z", "name": "Ibuprofen"])
+        add(.medication, ["time": "2026-06-13T09:00:00Z", "name": "Acetaminophen"])
+        add(.medication, ["time": "2026-06-01T09:00:00Z", "name": "Acetaminophen"]) // before the window
+        add(.medication, ["time": "2026-06-13T12:00:00Z", "name": "Ibuprofen"], child: 2)
+
+        XCTAssertEqual(aggregator.doses(all(), childID: 1, period: .week, now: now)
+            .map { $0.payloadObject["name"] as? String }, ["Acetaminophen", "Ibuprofen"])
+    }
+
+    /// One medicine per name however it was spelled, in the order its first dose appears.
+    func testDoseTalliesGroupByNormalizedName() {
+        add(.medication, ["time": "2026-06-13T09:00:00Z", "name": "Acetaminophen"])
+        add(.medication, ["time": "2026-06-13T15:00:00Z", "name": "Ibuprofen"])
+        add(.medication, ["time": "2026-06-14T09:00:00Z", "name": "acetaminophen "])
+        add(.medication, ["time": "2026-06-14T15:00:00Z", "name": ""])
+
+        let tallies = aggregator.doseTallies(aggregator.doses(all(), childID: 1, period: .week, now: now))
+        XCTAssertEqual(tallies.map(\.name), ["Acetaminophen", "Ibuprofen", "Medication"])
+        XCTAssertEqual(tallies.map(\.count), [2, 1, 1])
+        XCTAssertEqual(tallies.map(\.id), ["acetaminophen", "ibuprofen", ""])
+    }
+
     // MARK: Helpers
 
     private func iso(_ date: Date) -> String { ISO8601DateFormatter().string(from: date) }
